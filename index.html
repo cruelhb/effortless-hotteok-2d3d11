@@ -1,0 +1,1401 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>팀별 회식비 조회 시스템</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'Noto Sans KR', 'sans-serif'],
+            outfit: ['Outfit', 'sans-serif'],
+          },
+          animation: {
+            'pulse-subtle': 'pulseSubtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+          },
+          keyframes: {
+            pulseSubtle: {
+              '0%, 100%': { opacity: 1, transform: 'scale(1)' },
+              '50%': { opacity: .7, transform: 'scale(1.05)' },
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;600;700;800&family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  
+  <!-- React and ReactDOM UMD -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <!-- Babel Standalone for in-browser JSX compilation -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <style>
+    /* Glassmorphism utility classes */
+    .glass-card {
+      background: rgba(255, 255, 255, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    .dark .glass-card {
+      background: rgba(30, 41, 59, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(156, 163, 175, 0.3);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(156, 163, 175, 0.5);
+    }
+    /* Shake animation */
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20%, 60% { transform: translateX(-6px); }
+      40%, 80% { transform: translateX(6px); }
+    }
+    .animate-shake {
+      animation: shake 0.3s ease-in-out;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 transition-colors duration-300 min-h-screen">
+
+  <div id="root"></div>
+
+  <!-- Firebase UMD Libraries (Compat style) -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+  <!-- React Application using JSX -->
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+       // 1. Firebase Initializer
+    const firebaseConfig = {
+      apiKey: "AIzaSyBjTrejuwH8exAarzXD1L3VPlSgMqR7wtc",
+      authDomain: "team-dining.firebaseapp.com",
+      projectId: "team-dining",
+      storageBucket: "team-dining.firebasestorage.app",
+      messagingSenderId: "464022477514",
+      appId: "1:464022477514:web:e73943edac9b41e75ef233"
+    };
+    const appId = "team-dining-web"; // 임의의 고유 앱 식별자
+    
+    const isFirebaseConfigured = firebaseConfig && firebaseConfig.apiKey;
+    let auth, db;
+
+    if (isFirebaseConfigured) {
+      // Initialize Firebase via UMD compat
+      firebase.initializeApp(firebaseConfig);
+      auth = firebase.auth();
+      db = firebase.firestore();
+    }
+
+    const generateId = () => Math.random().toString(36).substr(2, 9);
+
+    // Mock Database for Local Testing (Syncs across tabs via storage event)
+    const mockDb = {
+      getTeams: () => {
+        const data = localStorage.getItem('mock_teams');
+        if (!data) {
+          const initialTeams = [
+            { id: generateId(), name: '삼성인서면1팀', carryOver: 100000, usedAmount: 0, memberCount: 15, perPersonAmount: 40000, additionalMemberCount: 0, additionalPerPersonAmount: 30000, viewPasscode: '1234', createdAt: Date.now() },
+            { id: generateId(), name: '마케팅팀', carryOver: 50000, usedAmount: 0, memberCount: 10, perPersonAmount: 30000, additionalMemberCount: 0, additionalPerPersonAmount: 30000, viewPasscode: '1234', createdAt: Date.now() + 1 },
+            { id: generateId(), name: '개발1팀', carryOver: 200000, usedAmount: 0, memberCount: 20, perPersonAmount: 40000, additionalMemberCount: 0, additionalPerPersonAmount: 30000, viewPasscode: '1234', createdAt: Date.now() + 2 },
+          ];
+          localStorage.setItem('mock_teams', JSON.stringify(initialTeams));
+          return initialTeams;
+        }
+        return JSON.parse(data);
+      },
+      saveTeams: (teams) => {
+        localStorage.setItem('mock_teams', JSON.stringify(teams));
+        mockDb.listeners.forEach(cb => cb(teams));
+      },
+      listeners: [],
+      onSnapshot: (callback) => {
+        mockDb.listeners.push(callback);
+        callback(mockDb.getTeams());
+        return () => {
+          mockDb.listeners = mockDb.listeners.filter(cb => cb !== callback);
+        };
+      }
+    };
+
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'mock_teams') {
+        const teams = JSON.parse(e.newValue || '[]');
+        mockDb.listeners.forEach(cb => cb(teams));
+      }
+    });
+
+    // Inline SVG Icon components for reliability and performance
+    const Icons = {
+      Building: () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg>
+      ),
+      Wallet: () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>
+      ),
+      Settings: () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+      ),
+      Eye: () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+      ),
+      Plus: () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+      ),
+      Trash: () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+      ),
+      Copy: () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+      ),
+      AlertCircle: () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+      ),
+      ChevronDown: () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      ),
+      CheckCircle: () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+      ),
+      Cloud: () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19A3.5 3.5 0 0 0 21 15.5c0-2.79-2.54-4.5-5-4.5-.47 0-.89.09-1.3.27A6.47 6.47 0 0 0 8 7.5a6.5 6.5 0 0 0-6.32 5.06A4.5 4.5 0 0 0 4.5 19Z"/></svg>
+      ),
+      Sun: () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+      ),
+      Moon: () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+      ),
+      Undo: () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+      ),
+      GripVertical: () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg>
+      )
+    };
+
+    function App() {
+      const [user, setUser] = useState(null);
+      const [mode, setMode] = useState('user'); 
+      const [isSharedLink, setIsSharedLink] = useState(false);
+      const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(
+        sessionStorage.getItem('isAdminAuthenticated') === 'true'
+      );
+      const [showPasscodeModal, setShowPasscodeModal] = useState(false);
+      const [passcodeVal, setPasscodeVal] = useState('');
+      const [passcodeError, setPasscodeError] = useState(false);
+      const [adminPasscode, setAdminPasscode] = useState(
+        localStorage.getItem('admin_passcode') || '1234'
+      );
+      const [showPasscodeChange, setShowPasscodeChange] = useState(false);
+      const [newPasscode, setNewPasscode] = useState('');
+      const [teams, setTeams] = useState([]);
+      const [selectedTeamId, setSelectedTeamId] = useState('');
+      const [toastMessage, setToastMessage] = useState('');
+      const [isLoading, setIsLoading] = useState(true);
+      const [darkMode, setDarkMode] = useState(false);
+
+      // 팀별 조회 비밀번호 인증 상태 (세션 유지)
+      const [authenticatedTeams, setAuthenticatedTeams] = useState(() => {
+        try {
+          const saved = sessionStorage.getItem('authenticated_teams');
+          return saved ? JSON.parse(saved) : {};
+        } catch (e) {
+          return {};
+        }
+      });
+      const [teamPasscodeVal, setTeamPasscodeVal] = useState('');
+      const [teamPasscodeError, setTeamPasscodeError] = useState(false);
+      // 이월금 임시 입력 상태 (마이너스 부호 등 버퍼용)
+      const [tempCarryOver, setTempCarryOver] = useState({});
+      // 사용금액 임시 입력 상태
+      const [tempUsedAmount, setTempUsedAmount] = useState({});
+      // 팀 조회 화면 검색어 상태
+      const [userSearchTerm, setUserSearchTerm] = useState('');
+      
+      // 드래그 앤 드롭 상태
+      const [draggedTeamId, setDraggedTeamId] = useState(null);
+      const [dragOverInfo, setDragOverInfo] = useState({ id: null, position: null });
+
+      // 삭제 확인 팝업 상태
+      const [teamToDelete, setTeamToDelete] = useState(null);
+
+      const handleAuthenticateTeam = (teamId, passcode) => {
+        const targetTeam = teams.find(t => t.id === teamId);
+        if (!targetTeam) return false;
+        
+        const actualPasscode = targetTeam.viewPasscode || '0000';
+        if (passcode === actualPasscode) {
+          const updated = { ...authenticatedTeams, [teamId]: true };
+          setAuthenticatedTeams(updated);
+          sessionStorage.setItem('authenticated_teams', JSON.stringify(updated));
+          showToast(`🔓 ${targetTeam.name} 조회 권한이 인증되었습니다.`);
+          return true;
+        } else {
+          return false;
+        }
+      };
+
+      // 팀을 변경할 때 입력값 및 에러 초기화
+      useEffect(() => {
+        setTeamPasscodeVal('');
+        setTeamPasscodeError(false);
+      }, [selectedTeamId]);
+
+      // Initialize theme from localStorage or system preference
+      useEffect(() => {
+        const savedTheme = localStorage.getItem('theme');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
+          setDarkMode(true);
+          document.documentElement.classList.add('dark');
+        } else {
+          setDarkMode(false);
+          document.documentElement.classList.remove('dark');
+        }
+      }, []);
+
+      const toggleTheme = () => {
+        if (darkMode) {
+          document.documentElement.classList.remove('dark');
+          localStorage.setItem('theme', 'light');
+          setDarkMode(false);
+        } else {
+          document.documentElement.classList.add('dark');
+          localStorage.setItem('theme', 'dark');
+          setDarkMode(true);
+        }
+      };
+
+      // Set user mode if passed in query params
+      useEffect(() => {
+        try {
+          const params = new URLSearchParams(window.location.search);
+          if (params.get('mode') === 'user') {
+            setMode('user');
+            setIsSharedLink(true);
+          } else {
+            setMode('user');
+            setIsSharedLink(false);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }, []);
+
+      const handleAdminTabClick = () => {
+        if (isAdminAuthenticated) {
+          setMode('admin');
+        } else {
+          setShowPasscodeModal(true);
+          setPasscodeVal('');
+          setPasscodeError(false);
+        }
+      };
+
+      const handlePasscodeSubmit = (e) => {
+        if (e) e.preventDefault();
+        if (passcodeVal === adminPasscode) {
+          setIsAdminAuthenticated(true);
+          sessionStorage.setItem('isAdminAuthenticated', 'true');
+          setShowPasscodeModal(false);
+          setMode('admin');
+          setPasscodeVal('');
+          showToast('🔑 관리자 권한이 인증되었습니다.');
+        } else {
+          setPasscodeError(true);
+          setPasscodeVal('');
+          setTimeout(() => setPasscodeError(false), 500);
+        }
+      };
+
+      const handlePasscodeChange = (e) => {
+        if (e) e.preventDefault();
+        if (newPasscode.length < 4) {
+          showToast('⚠️ 비밀번호는 4자리 이상이어야 합니다.');
+          return;
+        }
+        localStorage.setItem('admin_passcode', newPasscode);
+        setAdminPasscode(newPasscode);
+        setNewPasscode('');
+        setShowPasscodeChange(false);
+        showToast('🔒 관리자 비밀번호가 변경되었습니다.');
+      };
+
+      // 2. Authentication Config
+      useEffect(() => {
+        if (!isFirebaseConfigured) {
+          // Running in offline / mock mode
+          setUser({ uid: 'mock-admin-user', isAnonymous: true });
+          return;
+        }
+
+        const initAuth = async () => {
+          try {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+              await auth.signInWithCustomToken(__initial_auth_token);
+            } else {
+              await auth.signInAnonymously();
+            }
+          } catch (error) {
+            console.error('인증 오류:', error);
+          }
+        };
+        initAuth();
+
+        const unsubscribe = auth.onAuthStateChanged(setUser);
+        return () => unsubscribe();
+      }, []);
+
+      // 3. Realtime Database Hook
+      useEffect(() => {
+        if (isFirebaseConfigured) {
+          const teamsRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('teams');
+          
+          const unsubscribe = teamsRef.onSnapshot((snapshot) => {
+            if (snapshot.empty) {
+              const initialTeams = [
+                { id: generateId(), name: '삼성인서면1팀', carryOver: 100000, usedAmount: 0, memberCount: 15, perPersonAmount: 40000, additionalMemberCount: 0, additionalPerPersonAmount: 30000, viewPasscode: '1234', createdAt: Date.now() },
+                { id: generateId(), name: '마케팅팀', carryOver: 50000, usedAmount: 0, memberCount: 10, perPersonAmount: 30000, additionalMemberCount: 0, additionalPerPersonAmount: 30000, viewPasscode: '1234', createdAt: Date.now() + 1 },
+                { id: generateId(), name: '개발1팀', carryOver: 200000, usedAmount: 0, memberCount: 20, perPersonAmount: 40000, additionalMemberCount: 0, additionalPerPersonAmount: 30000, viewPasscode: '1234', createdAt: Date.now() + 2 },
+              ];
+              initialTeams.forEach(team => {
+                teamsRef.doc(team.id).set(team);
+              });
+            } else {
+              const loadedTeams = [];
+              snapshot.forEach(doc => {
+                loadedTeams.push({ id: doc.id, ...doc.data() });
+              });
+              loadedTeams.sort((a, b) => {
+                if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+                return (a.createdAt || 0) - (b.createdAt || 0);
+              });
+              setTeams(loadedTeams);
+            }
+            setIsLoading(false);
+          }, (error) => {
+            showToast(`❌ 데이터 동기화 실패: ${error.message}`);
+            console.error("데이터 동기화 오류:", error);
+            setIsLoading(false);
+          });
+
+          return () => unsubscribe();
+        } else {
+          // Offline / LocalStorage Mock Mode
+          const unsubscribe = mockDb.onSnapshot((loadedTeams) => {
+            const sorted = [...loadedTeams].sort((a, b) => {
+              if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+              return (a.createdAt || 0) - (b.createdAt || 0);
+            });
+            setTeams(sorted);
+            setIsLoading(false);
+          });
+          return () => unsubscribe();
+        }
+      }, []);
+
+      const showToast = (msg) => {
+        setToastMessage(msg);
+        setTimeout(() => setToastMessage(''), 3000);
+      };
+
+      // Drag and Drop Handlers
+      const handleDragStart = (e, teamId) => {
+        setDraggedTeamId(teamId);
+        e.dataTransfer.setData('text/plain', teamId);
+        e.dataTransfer.effectAllowed = 'move';
+      };
+
+      const handleDragOver = (e, teamId) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        
+        if (teamId === draggedTeamId) {
+          setDragOverInfo({ id: null, position: null });
+          return;
+        }
+
+        // 마우스의 위치를 계산해 팀의 '위'인지 '아래'인지 판별
+        const rect = e.currentTarget.getBoundingClientRect();
+        const midPoint = rect.top + rect.height / 2;
+        const position = e.clientY < midPoint ? 'top' : 'bottom';
+        
+        setDragOverInfo({ id: teamId, position });
+      };
+
+      const handleDragLeave = (e) => {
+        // 자식 요소로 진입할 때의 깜빡임 방지
+        if (!e.currentTarget.contains(e.relatedTarget)) {
+          setDragOverInfo({ id: null, position: null });
+        }
+      };
+
+      const handleDrop = (e, targetTeamId) => {
+        e.preventDefault();
+        
+        const targetPos = dragOverInfo.position;
+        setDragOverInfo({ id: null, position: null });
+
+        if (!draggedTeamId || draggedTeamId === targetTeamId || !targetPos) {
+          setDraggedTeamId(null);
+          return;
+        }
+
+        const newTeams = [...teams];
+        const draggedIndex = newTeams.findIndex(t => t.id === draggedTeamId);
+        const [removed] = newTeams.splice(draggedIndex, 1);
+        
+        // 배열이 변경되었으므로 targetIndex를 다시 찾음
+        let newTargetIndex = newTeams.findIndex(t => t.id === targetTeamId);
+        if (targetPos === 'bottom') {
+          newTargetIndex += 1;
+        }
+        
+        newTeams.splice(newTargetIndex, 0, removed);
+        
+        const updatedTeams = newTeams.map((t, index) => ({ ...t, order: index }));
+        setTeams(updatedTeams);
+        setDraggedTeamId(null);
+
+        if (isFirebaseConfigured) {
+          const batch = db.batch();
+          updatedTeams.forEach(t => {
+            const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('teams').doc(t.id);
+            batch.set(docRef, { order: t.order }, { merge: true });
+          });
+          batch.commit().catch(err => {
+            showToast(`❌ 순서 저장 실패: ${err.message}`);
+            console.error(err);
+          });
+        } else {
+          mockDb.saveTeams(updatedTeams);
+        }
+      };
+
+      const handleDragEnd = () => {
+        setDraggedTeamId(null);
+        setDragOverInfo({ id: null, position: null });
+      };
+
+      // Create a Team
+      const handleAddTeam = () => {
+        const newId = generateId();
+        const newTeam = { name: '새로운 팀', carryOver: 0, usedAmount: 0, memberCount: 0, perPersonAmount: 30000, additionalMemberCount: 0, additionalPerPersonAmount: 30000, viewPasscode: '0000', createdAt: Date.now() };
+
+        if (isFirebaseConfigured) {
+          const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('teams').doc(newId);
+          docRef.set(newTeam).catch(err => {
+            showToast(`❌ 팀 추가 실패: ${err.message}`);
+            console.error(err);
+          });
+        } else {
+          const currentTeams = mockDb.getTeams();
+          currentTeams.push({ id: newId, ...newTeam });
+          mockDb.saveTeams(currentTeams);
+          showToast('➕ 새로운 팀이 추가되었습니다.');
+        }
+      };
+
+      // Remove a Team
+      const handleRemoveTeam = (id) => {
+        if (isFirebaseConfigured) {
+          const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('teams').doc(id);
+          docRef.delete().catch(err => {
+            showToast(`❌ 팀 삭제 실패: ${err.message}`);
+            console.error(err);
+          });
+        } else {
+          const currentTeams = mockDb.getTeams();
+          const filtered = currentTeams.filter(t => t.id !== id);
+          mockDb.saveTeams(filtered);
+          showToast('🗑️ 팀이 삭제되었습니다.');
+        }
+        if (selectedTeamId === id) setSelectedTeamId('');
+      };
+
+      // Update Team data
+      const handleUpdateTeam = (id, field, value) => {
+        // Optimistic UI updates
+        setTeams(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t));
+
+        if (isFirebaseConfigured) {
+          const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('teams').doc(id);
+          docRef.set({ [field]: value }, { merge: true }).catch(err => {
+            showToast(`❌ 저장 실패: ${err.message}`);
+            console.error(err);
+          });
+        } else {
+          const currentTeams = mockDb.getTeams();
+          const index = currentTeams.findIndex(t => t.id === id);
+          if (index > -1) {
+            currentTeams[index] = { ...currentTeams[index], [field]: value };
+            mockDb.saveTeams(currentTeams);
+          }
+        }
+      };
+
+      // Reset mock data helper
+      const handleResetMockData = () => {
+        localStorage.removeItem('mock_teams');
+        const initialTeams = [
+          { id: generateId(), name: '삼성인서면1팀', carryOver: 100000, usedAmount: 0, memberCount: 15, perPersonAmount: 40000, viewPasscode: '1234', createdAt: Date.now() },
+          { id: generateId(), name: '마케팅팀', carryOver: 50000, usedAmount: 0, memberCount: 10, perPersonAmount: 30000, viewPasscode: '1234', createdAt: Date.now() + 1 },
+          { id: generateId(), name: '개발1팀', carryOver: 200000, usedAmount: 0, memberCount: 20, perPersonAmount: 40000, viewPasscode: '1234', createdAt: Date.now() + 2 },
+        ];
+        mockDb.saveTeams(initialTeams);
+        showToast('🔄 샘플 데이터로 초기화되었습니다.');
+      };
+
+      const handleShare = () => {
+        try {
+          let baseUrl = window.location.href.split('?')[0].split('#')[0];
+          try {
+            if (window.top !== window.self && document.referrer) {
+              baseUrl = document.referrer.split('?')[0].split('#')[0];
+            }
+          } catch (e) {}
+          
+          const shareUrl = `${baseUrl}?mode=user`;
+          
+          const textArea = document.createElement("textarea");
+          textArea.value = shareUrl;
+          document.body.appendChild(textArea);
+          textArea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textArea);
+          
+          showToast('✅ 접속 링크 복사 완료!');
+        } catch (err) {
+          showToast('❌ 링크 복사에 실패했습니다.');
+        }
+      };
+
+      const formatCurrency = (amount) => {
+        if (amount === undefined || amount === null) return '0';
+        return new Intl.NumberFormat('ko-KR').format(amount);
+      };
+
+      if (isLoading) {
+        return (
+          <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center text-blue-600 dark:text-blue-400 space-y-4">
+            <div className="animate-pulse-subtle">
+              <Icons.Cloud />
+            </div>
+            <p className="font-medium text-sm animate-pulse">실시간 데이터베이스 연결 중...</p>
+          </div>
+        );
+      }
+
+      const selectedTeam = teams.find(t => t.id === selectedTeamId);
+
+      return (
+        <div className="min-h-screen text-slate-800 dark:text-slate-100 font-sans selection:bg-blue-200 transition-colors duration-300">
+          
+          {/* Header */}
+          <header className="bg-white/80 dark:bg-slate-900/80 border-b border-slate-200/50 dark:border-slate-800/50 sticky top-0 z-30 backdrop-blur-md">
+            <div className="max-w-4xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+              <div className="flex items-center gap-2.5 text-blue-600 dark:text-blue-400">
+                <div className="p-2 bg-blue-50 dark:bg-blue-950/50 rounded-xl">
+                  <Icons.Wallet />
+                </div>
+                <h1 className="text-xl font-bold tracking-tight font-outfit">팀별 회식비 조회</h1>
+              </div>
+              
+              <div className="flex items-center gap-3">
+                {/* Theme Toggle */}
+                <button
+                  onClick={toggleTheme}
+                  className="p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all"
+                  aria-label="화면 모드 변경"
+                >
+                  {darkMode ? <Icons.Sun /> : <Icons.Moon />}
+                </button>
+
+                {/* Mode Selector */}
+                {!isSharedLink && (
+                  <div className="flex bg-slate-100 dark:bg-slate-800/60 p-1 rounded-xl border border-slate-200/50 dark:border-slate-700/50">
+                    <button
+                      onClick={handleAdminTabClick}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg transition-all duration-200 ${
+                        mode === 'admin' 
+                          ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' 
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <Icons.Settings />
+                      <span className="hidden sm:inline">지원부 관리</span>
+                    </button>
+                    <button
+                      onClick={() => setMode('user')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg transition-all duration-200 ${
+                        mode === 'user' 
+                          ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' 
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <Icons.Eye />
+                      <span className="hidden sm:inline">팀 조회</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </header>
+
+          <main className={`${mode === 'admin' ? 'max-w-6xl' : 'max-w-4xl'} mx-auto px-4 sm:px-6 py-8 transition-all duration-300`}>
+            {mode === 'admin' && (
+              <div className="space-y-6 animate-in fade-in duration-300">
+                
+                {/* Admin Mode Card Banner */}
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-gradient-to-br from-blue-50 to-indigo-50/50 dark:from-blue-950/30 dark:to-indigo-950/20 border border-blue-100/50 dark:border-blue-900/30 p-5 rounded-2xl shadow-sm">
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <div className="text-blue-600 dark:text-blue-400"><Icons.Building /></div>
+                      지원부 관리 모드
+                      <span className="flex items-center gap-1 text-[10px] font-semibold bg-emerald-100/70 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded-full ml-2">
+                        <Icons.CheckCircle /> {isFirebaseConfigured ? '클라우드 연동' : '로컬 모드 실행 중'}
+                      </span>
+                    </h2>
+                    <p className="text-sm text-slate-600 dark:text-slate-400 mt-1.5 leading-relaxed">
+                      금액을 입력하면 실시간 데이터베이스에 변경사항이 즉시 업데이트되어 팀원 조회 화면에 바로 노출됩니다.
+                    </p>
+                  </div>
+                  <div className="flex w-full sm:w-auto gap-2">
+                    <button 
+                      onClick={() => {
+                        setShowPasscodeChange(true);
+                        setNewPasscode('');
+                      }}
+                      className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all border border-slate-200/50 dark:border-slate-700/50"
+                      title="관리자 비밀번호 변경"
+                    >
+                      <Icons.Settings />
+                      <span>비번 변경</span>
+                    </button>
+                    {!isFirebaseConfigured && (
+                      <button 
+                        onClick={handleResetMockData}
+                        className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all border border-slate-200/50 dark:border-slate-700/50"
+                        title="샘플 데이터 복구"
+                      >
+                        <Icons.Undo />
+                        <span>초기화</span>
+                      </button>
+                    )}
+                    <button 
+                      onClick={handleShare}
+                      className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white px-5 py-2.5 rounded-xl font-semibold text-sm shadow-sm transition-all active:scale-95 whitespace-nowrap"
+                    >
+                      <Icons.Copy />
+                      접속 링크 복사
+                    </button>
+                  </div>
+                </div>
+
+                {/* Team List Table Container */}
+                <div className="bg-white dark:bg-slate-900 shadow-sm border border-slate-200/60 dark:border-slate-800/80 rounded-2xl overflow-hidden transition-colors">
+                  <div className="p-5 sm:p-6 space-y-4">
+                    {teams.length > 0 && (
+                      <div className="hidden lg:flex gap-2 text-xs font-bold text-slate-400 dark:text-slate-550 border-b border-slate-200/40 dark:border-slate-800/50 pb-3 select-none">
+                        <div className="w-[20px] ml-1"></div>
+                        <div className="flex-[1.5] pl-1">팀명</div>
+                        <div className="flex-[1.0] text-center">조회비밀번호</div>
+                        <div className="flex-[1.4] text-right pr-6">전월이월금액</div>
+                        <div className="flex-[1.4] text-right pr-6">당월사용금액</div>
+                        <div className="flex-[0.7] text-right pr-4">인원</div>
+                        <div className="flex-[0.7] text-center">인당금액</div>
+                        <div className="flex-[0.7] text-right pr-4">추가인원</div>
+                        <div className="flex-[0.7] text-center">추가금액</div>
+                        <div className="flex-[1.5] text-right pr-6">합계</div>
+                        <div className="w-[44px]"></div>
+                      </div>
+                    )}
+                    {teams.length === 0 ? (
+                      <div className="text-center py-8 text-slate-400 dark:text-slate-550">
+                        <p>등록된 팀이 없습니다. 아래 버튼으로 추가해보세요.</p>
+                      </div>
+                    ) : (
+                      teams.map((team) => {
+                        const totalMembers = (team.memberCount || 0) + (team.additionalMemberCount || 0);
+                        const meetingExpense = totalMembers === 0 ? 0 : (totalMembers <= 10 ? 50000 : 100000);
+                        const remainingBalance = (team.carryOver || 0) + ((team.memberCount || 0) * (team.perPersonAmount || 0)) + ((team.additionalMemberCount || 0) * (team.additionalPerPersonAmount || 30000)) - (team.usedAmount || 0);
+                        return (
+                          <div 
+                            key={team.id} 
+                            draggable
+                            onDragStart={(e) => handleDragStart(e, team.id)}
+                            onDragOver={(e) => handleDragOver(e, team.id)}
+                            onDragLeave={handleDragLeave}
+                            onDrop={(e) => handleDrop(e, team.id)}
+                            onDragEnd={handleDragEnd}
+                            className={`flex flex-col lg:flex-row gap-1 lg:gap-2 items-start lg:items-center p-4 lg:p-0 bg-slate-50/50 dark:bg-slate-800/20 lg:bg-transparent rounded-2xl border ${draggedTeamId === team.id ? 'opacity-50 border-slate-300 dark:border-slate-700' : 'border-slate-100 dark:border-slate-800/40 lg:border-transparent'} transition-all relative group`}
+                            style={{
+                              boxShadow: dragOverInfo.id === team.id 
+                                ? (dragOverInfo.position === 'top' ? '0 -3px 0 0 #3b82f6' : '0 3px 0 0 #3b82f6')
+                                : 'none',
+                              zIndex: dragOverInfo.id === team.id ? 10 : 1
+                            }}
+                          >
+                            
+                            {/* 그립 아이콘 (드래그 핸들) */}
+                            <div className="hidden lg:flex items-center justify-center cursor-grab text-slate-300 hover:text-slate-500 dark:text-slate-600 dark:hover:text-slate-400 active:cursor-grabbing w-[20px] ml-1">
+                              <Icons.GripVertical />
+                            </div>
+
+                            {/* 1. 팀 이름 */}
+                            <div className="flex-[1.5] pl-0 lg:pl-1 w-full">
+                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-550 mb-1 block lg:hidden">팀 이름</span>
+                              <input
+                                type="text"
+                                value={team.name}
+                                onChange={(e) => handleUpdateTeam(team.id, 'name', e.target.value)}
+                                className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent outline-none transition-all dark:text-white font-medium text-sm"
+                                placeholder="예: 영업1팀"
+                              />
+                            </div>
+                            
+                            {/* 1.5. 조회 비밀번호 */}
+                            <div className="flex-[1.0] w-full">
+                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-550 mb-1 block lg:hidden">조회 비밀번호 (4자리)</span>
+                              <input
+                                type="text"
+                                maxLength="4"
+                                pattern="[0-9]*"
+                                inputMode="numeric"
+                                value={team.viewPasscode || ''}
+                                onChange={(e) => {
+                                  const rawValue = e.target.value.replace(/[^0-9]/g, '');
+                                  handleUpdateTeam(team.id, 'viewPasscode', rawValue);
+                                }}
+                                className="w-full px-2 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent outline-none transition-all text-center font-bold font-outfit dark:text-white text-sm"
+                                placeholder="0000"
+                              />
+                            </div>
+ 
+                            {/* 2. 전월 이월금액 */}
+                            <div className="flex-[1.4] w-full relative">
+                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-550 mb-1 block lg:hidden">전월 이월금액</span>
+                              <input
+                                type="text"
+                                value={
+                                  tempCarryOver[team.id] !== undefined
+                                    ? tempCarryOver[team.id]
+                                    : (team.carryOver === 0 ? '' : formatCurrency(team.carryOver))
+                                }
+                                onChange={(e) => {
+                                  const val = e.target.value.replace(/[^-0-9]/g, '');
+                                  const cleanVal = val.startsWith('-') ? '-' + val.replace(/-/g, '') : val.replace(/-/g, '');
+                                  setTempCarryOver(prev => ({ ...prev, [team.id]: cleanVal }));
+                                  
+                                  if (cleanVal !== '' && cleanVal !== '-') {
+                                    handleUpdateTeam(team.id, 'carryOver', parseInt(cleanVal, 10));
+                                  } else if (cleanVal === '') {
+                                    handleUpdateTeam(team.id, 'carryOver', 0);
+                                  }
+                                }}
+                                onBlur={() => {
+                                  setTempCarryOver(prev => {
+                                    const copy = { ...prev };
+                                    delete copy[team.id];
+                                    return copy;
+                                  });
+                                }}
+                                className="w-full pl-2 pr-6 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/50 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent outline-none transition-all text-right font-semibold font-outfit dark:text-white text-sm"
+                                placeholder="0"
+                              />
+                              <span className="absolute right-2 top-[50%] lg:top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-555 font-semibold text-xs lg:mt-0 mt-[8px]">원</span>
+                            </div>
+                            
+                            {/* 2.5. 당월 사용금액 */}
+                            <div className="flex-[1.4] w-full relative">
+                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-555 mb-1 block lg:hidden">당월 사용금액</span>
+                              <input
+                                type="text"
+                                value={
+                                  tempUsedAmount[team.id] !== undefined
+                                    ? tempUsedAmount[team.id]
+                                    : (team.usedAmount === 0 ? '' : formatCurrency(team.usedAmount))
+                                }
+                                onChange={(e) => {
+                                  const val = e.target.value.replace(/[^-0-9]/g, '');
+                                  const cleanVal = val.startsWith('-') ? '-' + val.replace(/-/g, '') : val.replace(/-/g, '');
+                                  setTempUsedAmount(prev => ({ ...prev, [team.id]: cleanVal }));
+                                  
+                                  if (cleanVal !== '' && cleanVal !== '-') {
+                                    handleUpdateTeam(team.id, 'usedAmount', parseInt(cleanVal, 10));
+                                  } else if (cleanVal === '') {
+                                    handleUpdateTeam(team.id, 'usedAmount', 0);
+                                  }
+                                }}
+                                onBlur={() => {
+                                  setTempUsedAmount(prev => {
+                                    const copy = { ...prev };
+                                    delete copy[team.id];
+                                    return copy;
+                                  });
+                                }}
+                                className="w-full pl-2 pr-6 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/50 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent outline-none transition-all text-right font-semibold font-outfit dark:text-white text-sm"
+                                placeholder="0"
+                              />
+                              <span className="absolute right-2 top-[50%] lg:top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-555 font-semibold text-xs lg:mt-0 mt-[8px]">원</span>
+                            </div>
+                            
+                            {/* 3. 본 인력 */}
+                            <div className="flex-[0.7] w-full relative">
+                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-555 mb-1 block lg:hidden">이번달 인력수</span>
+                              <input
+                                type="text"
+                                value={team.memberCount === 0 ? '' : team.memberCount}
+                                onChange={(e) => {
+                                  const rawValue = e.target.value.replace(/[^0-9]/g, '');
+                                  handleUpdateTeam(team.id, 'memberCount', rawValue === '' ? 0 : parseInt(rawValue, 10));
+                                }}
+                                className="w-full pl-2 pr-5 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent outline-none transition-all text-right font-semibold dark:text-white font-outfit text-sm"
+                                placeholder="0"
+                              />
+                              <span className="absolute right-2 top-[50%] lg:top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-555 font-semibold text-xs lg:mt-0 mt-[8px]">명</span>
+                            </div>
+ 
+                            {/* 4. 본 금액 */}
+                            <div className="flex-[0.7] w-full">
+                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-555 mb-1 block lg:hidden">인당 회식비</span>
+                              <div className="flex bg-slate-100 dark:bg-slate-800/50 p-0.5 rounded-lg border border-slate-200/50 dark:border-slate-700/50 h-[38px] items-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateTeam(team.id, 'perPersonAmount', 30000)}
+                                  className={`flex-1 h-full text-xs font-bold rounded-lg transition-all ${
+                                    team.perPersonAmount === 30000
+                                      ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                                      : 'text-slate-500 dark:text-slate-450 hover:text-slate-800 dark:hover:text-slate-200'
+                                  }`}
+                                >
+                                  3만
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateTeam(team.id, 'perPersonAmount', 40000)}
+                                  className={`flex-1 h-full text-xs font-bold rounded-lg transition-all ${
+                                    team.perPersonAmount === 40000
+                                      ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                                      : 'text-slate-500 dark:text-slate-450 hover:text-slate-800 dark:hover:text-slate-200'
+                                  }`}
+                                >
+                                  4만
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* 4.5. 추가 인력 */}
+                            <div className="flex-[0.7] w-full relative">
+                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-555 mb-1 block lg:hidden">추가 인력</span>
+                              <input
+                                type="text"
+                                value={team.additionalMemberCount === 0 ? '' : (team.additionalMemberCount || '')}
+                                onChange={(e) => {
+                                  const rawValue = e.target.value.replace(/[^0-9]/g, '');
+                                  handleUpdateTeam(team.id, 'additionalMemberCount', rawValue === '' ? 0 : parseInt(rawValue, 10));
+                                }}
+                                className="w-full pl-2 pr-5 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent outline-none transition-all text-right font-semibold dark:text-white font-outfit text-sm"
+                                placeholder="0"
+                              />
+                              <span className="absolute right-2 top-[50%] lg:top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-555 font-semibold text-xs lg:mt-0 mt-[8px]">명</span>
+                            </div>
+
+                            {/* 4.6. 추가 금액 */}
+                            <div className="flex-[0.7] w-full">
+                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-555 mb-1 block lg:hidden">추가 금액</span>
+                              <div className="flex bg-slate-100 dark:bg-slate-800/50 p-0.5 rounded-lg border border-slate-200/50 dark:border-slate-700/50 h-[38px] items-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateTeam(team.id, 'additionalPerPersonAmount', 30000)}
+                                  className={`flex-1 h-full text-xs font-bold rounded-lg transition-all ${
+                                    (team.additionalPerPersonAmount || 30000) === 30000
+                                      ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                                      : 'text-slate-500 dark:text-slate-450 hover:text-slate-800 dark:hover:text-slate-200'
+                                  }`}
+                                >
+                                  3만
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateTeam(team.id, 'additionalPerPersonAmount', 40000)}
+                                  className={`flex-1 h-full text-xs font-bold rounded-lg transition-all ${
+                                    team.additionalPerPersonAmount === 40000
+                                      ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                                      : 'text-slate-500 dark:text-slate-450 hover:text-slate-800 dark:hover:text-slate-200'
+                                  }`}
+                                >
+                                  4만
+                                </button>
+                              </div>
+                            </div>
+                            
+                            {/* 5. 잔여 회식비 (자동 계산) */}
+                            <div className="flex-[1.5] w-full relative">
+                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-555 mb-1 block lg:hidden">잔여 회식비</span>
+                              <div className="w-full px-2 py-1.5 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100/30 dark:border-blue-900/30 rounded-lg text-right font-bold font-outfit text-blue-600 dark:text-blue-400 h-[38px] flex flex-col justify-center items-end select-none border border-blue-100/30">
+                                <div className="leading-none text-sm">
+                                  {formatCurrency(remainingBalance)}
+                                  <span className="text-slate-450 dark:text-slate-500 font-semibold text-[10px] ml-0.5 font-sans">원</span>
+                                </div>
+                                {meetingExpense > 0 && (
+                                  <div className="text-[9px] text-slate-400 dark:text-slate-500 font-semibold mt-0.5 leading-none">
+                                    면담비: {formatCurrency(meetingExpense)}원 (별도)
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            
+                            {/* 6. 삭제 버튼 */}
+                            <button
+                              onClick={() => setTeamToDelete(team)}
+                              className="w-full lg:w-auto p-2.5 text-slate-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-xl transition-all flex items-center justify-center border border-slate-200/60 dark:border-slate-800 lg:border-transparent mt-1 lg:mt-0"
+                              title="팀 삭제"
+                            >
+                              <Icons.Trash />
+                              <span className="lg:hidden ml-2 text-sm font-semibold">삭제</span>
+                            </button>
+                            
+                          </div>
+                        );
+                      })
+                    )}
+
+                    <button
+                      onClick={handleAddTeam}
+                      className="w-full py-3.5 border-2 border-dashed border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 rounded-xl font-semibold hover:border-blue-400 dark:hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 transition-all flex items-center justify-center gap-2 mt-4 bg-slate-50/50 hover:bg-blue-50/20 dark:bg-slate-900 dark:hover:bg-blue-950/10"
+                    >
+                      <Icons.Plus />
+                      새로운 팀 추가
+                    </button>
+                  </div>
+                </div>
+                
+                {/* Information Card */}
+                <div className="flex items-start gap-3 text-sm text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-900 border border-slate-200/40 dark:border-slate-800/40 p-4.5 rounded-xl">
+                  <div className="text-slate-400 dark:text-slate-500"><Icons.Cloud /></div>
+                  <p className="leading-relaxed">
+                    <strong>클라우드 동기화 모드:</strong> 수정 버튼을 누르거나 새로 링크를 발송하지 않아도 <strong>동일한 웹 주소에 접속된 모든 기기(모바일/데스크톱)에서 실시간으로 화면의 값이 변경</strong>됩니다.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {mode === 'user' && (
+              <div className="max-w-xl mx-auto space-y-6 animate-in fade-in duration-300 pt-6 sm:pt-10">
+                <div className="text-center space-y-2 mb-8">
+                  <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">우리 팀 회식비 조회</h2>
+                  <p className="text-slate-500 dark:text-slate-400 text-sm">소속된 팀을 선택하고 실시간으로 반영되는 회식비를 확인하세요.</p>
+                </div>
+
+                {/* Glassmorphic card */}
+                <div className="glass-card shadow-2xl shadow-slate-200/40 dark:shadow-none border border-white/40 dark:border-slate-800/80 rounded-3xl p-6 sm:p-8 space-y-8 relative overflow-hidden transition-all duration-300">
+                  <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-400 via-indigo-500 to-purple-500"></div>
+                  
+                  <div className="space-y-4">
+                    {/* 검색어 필드 */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-400 dark:text-slate-500 tracking-wider">
+                        팀 검색
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={userSearchTerm}
+                          onChange={(e) => setUserSearchTerm(e.target.value)}
+                          placeholder="찾으시는 팀명을 입력하세요... (예: 서면)"
+                          className="w-full pl-10 pr-10 py-3 bg-slate-100/50 dark:bg-slate-800/30 border border-slate-200/50 dark:border-slate-700/50 rounded-2xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 outline-none text-slate-800 dark:text-white font-semibold transition-all text-sm shadow-inner"
+                        />
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+                          {/* 돋보기 아이콘 */}
+                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                        </span>
+                        {userSearchTerm && (
+                          <button
+                            type="button"
+                            onClick={() => setUserSearchTerm('')}
+                            className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-350 p-1 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 rounded-full transition-all"
+                            title="검색어 초기화"
+                          >
+                            {/* X 아이콘 */}
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 소속 팀 선택 드롭다운 */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <label className="text-xs font-bold text-slate-450 dark:text-slate-500 tracking-wider">
+                          소속 팀 선택
+                        </label>
+                        <span className="flex items-center gap-1.5 text-[9px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 px-2.5 py-1 rounded-full">
+                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                          실시간 연동됨
+                        </span>
+                      </div>
+                      <div className="relative">
+                        <select
+                          value={selectedTeamId}
+                          onChange={(e) => setSelectedTeamId(e.target.value)}
+                          className="w-full appearance-none px-4.5 py-4 bg-slate-100/70 dark:bg-slate-800/40 border border-slate-200/50 dark:border-slate-700/50 rounded-2xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 outline-none text-slate-800 dark:text-white font-semibold cursor-pointer transition-all text-base shadow-inner"
+                        >
+                          <option value="" disabled className="dark:bg-slate-900">
+                            {userSearchTerm 
+                              ? `검색 결과: ${teams.filter(t => t.name.toLowerCase().includes(userSearchTerm.toLowerCase())).length}개 팀` 
+                              : "조회할 팀을 선택하세요"}
+                          </option>
+                          {teams
+                            .filter(team => team.name.toLowerCase().includes(userSearchTerm.toLowerCase()))
+                            .map(team => (
+                              <option key={team.id} value={team.id} className="dark:bg-slate-900">{team.name}</option>
+                            ))
+                          }
+                        </select>
+                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+                          <Icons.ChevronDown />
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {selectedTeamId && selectedTeam ? (() => {
+                    const currentAllowance = (selectedTeam.memberCount || 0) * (selectedTeam.perPersonAmount || 0);
+                    const additionalAllowance = (selectedTeam.additionalMemberCount || 0) * (selectedTeam.additionalPerPersonAmount || 30000);
+                    const totalAllowance = currentAllowance + additionalAllowance;
+                    const totalMembers = (selectedTeam.memberCount || 0) + (selectedTeam.additionalMemberCount || 0);
+                    const meetingExpense = totalMembers === 0 ? 0 : (totalMembers <= 10 ? 50000 : 100000);
+                    const calculatedBalance = (selectedTeam.carryOver || 0) + totalAllowance - (selectedTeam.usedAmount || 0);
+                    const isAuthorized = authenticatedTeams[selectedTeam.id];
+
+                    if (!isAuthorized) {
+                      return (
+                        <div className="space-y-6 animate-in zoom-in-95 duration-200 bg-slate-50/50 dark:bg-slate-900/30 border border-slate-200/50 dark:border-slate-800 rounded-3xl p-6 text-center">
+                          <h3 className="text-md font-bold text-slate-900 dark:text-white flex items-center justify-center gap-2">
+                            <span>🔒</span> {selectedTeam.name} 조회 인증
+                          </h3>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            이 팀의 회식비를 조회하려면 관리자가 설정한 4자리 비밀번호를 입력해주세요.
+                          </p>
+                          <form 
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              const success = handleAuthenticateTeam(selectedTeam.id, teamPasscodeVal);
+                              if (!success) {
+                                setTeamPasscodeError(true);
+                                setTeamPasscodeVal('');
+                                setTimeout(() => setTeamPasscodeError(false), 500);
+                              }
+                            }}
+                            className={`space-y-4 max-w-[240px] mx-auto ${teamPasscodeError ? 'animate-shake' : ''}`}
+                          >
+                            <input
+                              type="password"
+                              pattern="[0-9]*"
+                              inputMode="numeric"
+                              maxLength="4"
+                              value={teamPasscodeVal}
+                              onChange={(e) => {
+                                const val = e.target.value.replace(/[^0-9]/g, '');
+                                setTeamPasscodeVal(val);
+                              }}
+                              placeholder="비밀번호 4자리"
+                              className={`w-full px-4 py-2.5 bg-white dark:bg-slate-800 border ${teamPasscodeError ? 'border-red-500 focus:ring-red-500' : 'border-slate-200 dark:border-slate-700 focus:ring-blue-500'} rounded-xl focus:ring-2 focus:border-transparent outline-none text-center font-bold text-base tracking-widest dark:text-white`}
+                              autoFocus
+                            />
+                            {teamPasscodeError && (
+                              <p className="text-[11px] text-red-500 font-semibold animate-pulse">
+                                비밀번호가 일치하지 않습니다.
+                              </p>
+                            )}
+                            <button
+                              type="submit"
+                              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-xl font-bold text-sm transition-all"
+                            >
+                              인증 및 조회
+                            </button>
+                          </form>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="space-y-6 animate-in zoom-in-95 duration-200">
+                        {/* 1. Main Calculated Remaining Balance Display */}
+                        <div className="bg-gradient-to-br from-blue-500/10 to-indigo-500/5 dark:from-slate-800/40 dark:to-slate-800/10 border border-blue-500/20 dark:border-slate-800 rounded-3xl p-7 text-center">
+                          <p className="text-blue-800 dark:text-blue-400 font-semibold mb-2">{selectedTeam.name} 잔여 회식비</p>
+                          <div className="flex items-baseline justify-center gap-1.5 mt-3">
+                            <span className="text-4xl sm:text-5xl font-black text-blue-600 dark:text-blue-400 tracking-tight transition-all duration-300 font-outfit">
+                              {formatCurrency(calculatedBalance)}
+                            </span>
+                            <span className="text-xl font-bold text-blue-800 dark:text-blue-400">원</span>
+                          </div>
+                        </div>
+
+                        {/* 2. Detailed Info Breakdown grid (4 Columns) */}
+                        <div className="space-y-5">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                            {/* Card 1: 전월 이월금액 */}
+                            <div className="bg-slate-50/70 dark:bg-slate-900/40 border border-slate-200/30 dark:border-slate-800 p-4 rounded-2xl flex flex-col justify-between h-[96px]">
+                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-550 block">전월 이월금액</span>
+                              <span className="text-lg font-bold text-slate-800 dark:text-slate-100 font-outfit block mt-1">
+                                {formatCurrency(selectedTeam.carryOver || 0)} <span className="text-xs font-medium text-slate-500 font-sans">원</span>
+                              </span>
+                            </div>
+                            
+                            {/* Card 2: 당월 사용금액 */}
+                            <div className="bg-rose-50/30 dark:bg-rose-950/10 border border-rose-100/50 dark:border-rose-900/30 p-4 rounded-2xl flex flex-col justify-between h-[96px]">
+                              <span className="text-xs font-bold text-rose-700 dark:text-rose-450 block">당월 사용금액</span>
+                              <div className="mt-1">
+                                <span className="text-lg font-bold text-rose-600 dark:text-rose-400 font-outfit block">
+                                  - {formatCurrency(selectedTeam.usedAmount || 0)} <span className="text-xs font-medium text-rose-500 font-sans">원</span>
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Card 3: 이번달 지원 금액 */}
+                            <div className="bg-slate-50/70 dark:bg-slate-900/40 border border-slate-200/30 dark:border-slate-800 p-4 rounded-2xl flex flex-col justify-between h-[96px] sm:col-span-2 lg:col-span-2">
+                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-550 block">이번달 총 지원 금액</span>
+                              <div className="mt-1 flex items-end justify-between">
+                                <span className="text-lg font-bold text-blue-600 dark:text-blue-400 font-outfit block">
+                                  {formatCurrency(totalAllowance)} <span className="text-xs font-medium text-slate-500 font-sans">원</span>
+                                </span>
+                                <div className="text-right flex flex-col gap-0.5">
+                                  <span className="text-[10px] text-slate-455 dark:text-slate-500 font-semibold leading-none">
+                                    본인원: {selectedTeam.memberCount || 0}명 x {selectedTeam.perPersonAmount === 30000 ? '3만' : '4만'}
+                                  </span>
+                                  {(selectedTeam.additionalMemberCount || 0) > 0 && (
+                                    <span className="text-[10px] text-slate-455 dark:text-slate-500 font-semibold leading-none">
+                                      추가: {selectedTeam.additionalMemberCount}명 x {selectedTeam.additionalPerPersonAmount === 30000 ? '3만' : '4만'}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 별도 항목 구분선 */}
+                          <div className="pt-1">
+                            <div className="flex items-center gap-2.5 mb-2.5">
+                              <span className="h-px bg-slate-200/60 dark:bg-slate-800/80 flex-1"></span>
+                              <span className="text-[10px] font-bold text-slate-455 dark:text-slate-500 tracking-wider">별도 집행 항목</span>
+                              <span className="h-px bg-slate-200/60 dark:bg-slate-800/80 flex-1"></span>
+                            </div>
+                            
+                            {/* Card 4: 면담비 (독립 배치 & 에메랄드 테마) */}
+                            <div className="bg-emerald-50/40 dark:bg-emerald-950/15 border border-emerald-100/50 dark:border-emerald-900/40 p-4 rounded-2xl flex justify-between items-center transition-all">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs font-bold text-emerald-800 dark:text-emerald-400">면담비</span>
+                                  <span className="text-[9px] font-extrabold bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded leading-none">
+                                    별도 지급
+                                  </span>
+                                </div>
+                                <span className="text-[10px] text-slate-400 dark:text-slate-550 block leading-normal">
+                                  {totalMembers === 0 ? '인원 없음 (0원)' : (totalMembers <= 10 ? '총 10명 이하 기준 (5만원)' : '총 11명 이상 기준 (10만원)')}
+                                </span>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-xl font-extrabold text-emerald-600 dark:text-emerald-400 font-outfit block">
+                                  {formatCurrency(meetingExpense)} <span className="text-xs font-bold text-emerald-800 dark:text-emerald-400 font-sans">원</span>
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <p className="text-xs text-center text-slate-400 dark:text-slate-555 font-medium leading-relaxed">
+                          전월 이월금액과 이번달 지원 금액을 합산한 금액입니다. (면담비 제외) 🍻✨
+                        </p>
+                      </div>
+                    );
+                  })() : (
+                    <div className="bg-slate-50/50 dark:bg-slate-800/10 border border-slate-100 dark:border-slate-800/80 border-dashed rounded-2xl p-8 text-center flex flex-col items-center justify-center text-slate-400 dark:text-slate-500">
+                      <div className="mb-2.5 opacity-60"><Icons.AlertCircle /></div>
+                      <p className="font-semibold text-sm">소속된 팀을 상단에서 선택해주세요</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </main>
+
+          {/* Passcode Verification Modal */}
+          {showPasscodeModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-md animate-in fade-in duration-200">
+              <div className={`w-full max-w-sm bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden transition-all ${passcodeError ? 'animate-shake' : ''}`}>
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-400 to-indigo-500"></div>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
+                  <span className="text-blue-600 dark:text-blue-400"><Icons.Settings /></span>
+                  지원부 관리자 인증
+                </h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
+                  관리자 모드 진입을 위해 비밀번호를 입력해주세요. (기본 비밀번호: 1234)
+                </p>
+                <form onSubmit={handlePasscodeSubmit} className="space-y-4">
+                  <div>
+                    <input
+                      type="password"
+                      pattern="[0-9]*"
+                      inputMode="numeric"
+                      value={passcodeVal}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^0-9]/g, '');
+                        setPasscodeVal(val);
+                      }}
+                      placeholder="비밀번호 입력"
+                      className={`w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border ${passcodeError ? 'border-red-500 focus:ring-red-500' : 'border-slate-200 dark:border-slate-700 focus:ring-blue-500'} rounded-2xl focus:ring-2 focus:border-transparent outline-none text-center font-bold text-lg tracking-widest dark:text-white`}
+                      autoFocus
+                    />
+                    {passcodeError && (
+                      <p className="text-xs text-red-500 mt-2 text-center font-semibold animate-pulse">
+                        비밀번호가 올바르지 않습니다. 다시 시도하세요.
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowPasscodeModal(false)}
+                      className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 rounded-xl font-semibold text-sm transition-all"
+                    >
+                      취소
+                    </button>
+                    <button
+                      type="submit"
+                      className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-xl font-semibold text-sm transition-all"
+                    >
+                      확인
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Passcode Change Modal */}
+          {showPasscodeChange && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-md animate-in fade-in duration-200">
+              <div className="w-full max-w-sm bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-400 to-indigo-500"></div>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
+                  <span className="text-blue-600 dark:text-blue-400"><Icons.Settings /></span>
+                  관리자 비밀번호 변경
+                </h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
+                  새로운 비밀번호(4자리 이상 숫자)를 입력해주세요.
+                </p>
+                <form onSubmit={handlePasscodeChange} className="space-y-4">
+                  <div>
+                    <input
+                      type="password"
+                      pattern="[0-9]*"
+                      inputMode="numeric"
+                      value={newPasscode}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^0-9]/g, '');
+                        setNewPasscode(val);
+                      }}
+                      placeholder="새 비밀번호 입력"
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-center font-bold text-lg tracking-widest dark:text-white"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="flex gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowPasscodeChange(false)}
+                      className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 rounded-xl font-semibold text-sm transition-all"
+                    >
+                      취소
+                    </button>
+                    <button
+                      type="submit"
+                      className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-xl font-semibold text-sm transition-all"
+                    >
+                      변경하기
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Delete Confirmation Modal */}
+          {teamToDelete && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-md animate-in fade-in duration-200">
+              <div className="w-full max-w-sm bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-400 to-rose-500"></div>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
+                  <span className="text-red-500"><Icons.AlertCircle /></span>
+                  팀 삭제 확인
+                </h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-6 leading-relaxed">
+                  정말 <strong>{teamToDelete.name}</strong>을(를) 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.
+                </p>
+                <div className="flex gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setTeamToDelete(null)}
+                    className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 rounded-xl font-semibold text-sm transition-all"
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleRemoveTeam(teamToDelete.id);
+                      setTeamToDelete(null);
+                    }}
+                    className="flex-1 py-3 bg-red-600 hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-600 text-white rounded-xl font-semibold text-sm transition-all shadow-sm"
+                  >
+                    삭제하기
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Toast Message */}
+          {toastMessage && (
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-5 duration-300">
+              <div className="bg-slate-900/95 dark:bg-white/95 text-white dark:text-slate-900 px-6 py-3.5 rounded-2xl shadow-xl font-semibold text-sm flex items-center gap-2 border border-white/10 dark:border-black/5 backdrop-blur">
+                <span>{toastMessage}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const container = document.getElementById('root');
+    const root = ReactDOM.createRoot(container);
+    root.render(<App />);
+  </script>
+</body>
+</html>
