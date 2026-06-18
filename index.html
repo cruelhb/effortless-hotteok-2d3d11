@@ -37,7 +37,7 @@
   <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <!-- Babel Standalone for in-browser JSX compilation -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.24.0/babel.min.js"></script>
   
   <style>
     /* Glassmorphism utility classes */
@@ -77,18 +77,15 @@
   </style>
 </head>
 <body class="bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 transition-colors duration-300 min-h-screen">
-
   <div id="root"></div>
-
   <!-- Firebase UMD Libraries (Compat style) -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-
   <!-- React Application using JSX -->
   <script type="text/babel">
+    /** @jsxRuntime classic */
     const { useState, useEffect, useRef } = React;
-
        // 1. Firebase Initializer
     const firebaseConfig = {
       apiKey: "AIzaSyBjTrejuwH8exAarzXD1L3VPlSgMqR7wtc",
@@ -102,16 +99,13 @@
     
     const isFirebaseConfigured = firebaseConfig && firebaseConfig.apiKey;
     let auth, db;
-
     if (isFirebaseConfigured) {
       // Initialize Firebase via UMD compat
       firebase.initializeApp(firebaseConfig);
       auth = firebase.auth();
       db = firebase.firestore();
     }
-
     const generateId = () => Math.random().toString(36).substr(2, 9);
-
     // Mock Database for Local Testing (Syncs across tabs via storage event)
     const mockDb = {
       getTeams: () => {
@@ -140,14 +134,12 @@
         };
       }
     };
-
     window.addEventListener('storage', (e) => {
       if (e.key === 'mock_teams') {
         const teams = JSON.parse(e.newValue || '[]');
         mockDb.listeners.forEach(cb => cb(teams));
       }
     });
-
     // Inline SVG Icon components for reliability and performance
     const Icons = {
       Building: () => (
@@ -196,7 +188,6 @@
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg>
       )
     };
-
     function App() {
       const [user, setUser] = useState(null);
       const [mode, setMode] = useState('user'); 
@@ -217,7 +208,6 @@
       const [toastMessage, setToastMessage] = useState('');
       const [isLoading, setIsLoading] = useState(true);
       const [darkMode, setDarkMode] = useState(false);
-
       // 팀별 조회 비밀번호 인증 상태 (세션 유지)
       const [authenticatedTeams, setAuthenticatedTeams] = useState(() => {
         try {
@@ -239,10 +229,8 @@
       // 드래그 앤 드롭 상태
       const [draggedTeamId, setDraggedTeamId] = useState(null);
       const [dragOverInfo, setDragOverInfo] = useState({ id: null, position: null });
-
       // 삭제 확인 팝업 상태
       const [teamToDelete, setTeamToDelete] = useState(null);
-
       const handleAuthenticateTeam = (teamId, passcode) => {
         const targetTeam = teams.find(t => t.id === teamId);
         if (!targetTeam) return false;
@@ -258,13 +246,11 @@
           return false;
         }
       };
-
       // 팀을 변경할 때 입력값 및 에러 초기화
       useEffect(() => {
         setTeamPasscodeVal('');
         setTeamPasscodeError(false);
       }, [selectedTeamId]);
-
       // Initialize theme from localStorage or system preference
       useEffect(() => {
         const savedTheme = localStorage.getItem('theme');
@@ -277,7 +263,6 @@
           document.documentElement.classList.remove('dark');
         }
       }, []);
-
       const toggleTheme = () => {
         if (darkMode) {
           document.documentElement.classList.remove('dark');
@@ -289,7 +274,6 @@
           setDarkMode(true);
         }
       };
-
       // Set user mode if passed in query params
       useEffect(() => {
         try {
@@ -305,7 +289,6 @@
           console.error(e);
         }
       }, []);
-
       const handleAdminTabClick = () => {
         if (isAdminAuthenticated) {
           setMode('admin');
@@ -315,7 +298,6 @@
           setPasscodeError(false);
         }
       };
-
       const handlePasscodeSubmit = (e) => {
         if (e) e.preventDefault();
         if (passcodeVal === adminPasscode) {
@@ -331,7 +313,6 @@
           setTimeout(() => setPasscodeError(false), 500);
         }
       };
-
       const handlePasscodeChange = (e) => {
         if (e) e.preventDefault();
         if (newPasscode.length < 4) {
@@ -344,7 +325,6 @@
         setShowPasscodeChange(false);
         showToast('🔒 관리자 비밀번호가 변경되었습니다.');
       };
-
       // 2. Authentication Config
       useEffect(() => {
         if (!isFirebaseConfigured) {
@@ -352,7 +332,6 @@
           setUser({ uid: 'mock-admin-user', isAnonymous: true });
           return;
         }
-
         const initAuth = async () => {
           try {
             if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -365,11 +344,9 @@
           }
         };
         initAuth();
-
         const unsubscribe = auth.onAuthStateChanged(setUser);
         return () => unsubscribe();
       }, []);
-
       // 3. Realtime Database Hook
       useEffect(() => {
         if (isFirebaseConfigured) {
@@ -402,7 +379,6 @@
             console.error("데이터 동기화 오류:", error);
             setIsLoading(false);
           });
-
           return () => unsubscribe();
         } else {
           // Offline / LocalStorage Mock Mode
@@ -417,19 +393,16 @@
           return () => unsubscribe();
         }
       }, []);
-
       const showToast = (msg) => {
         setToastMessage(msg);
         setTimeout(() => setToastMessage(''), 3000);
       };
-
       // Drag and Drop Handlers
       const handleDragStart = (e, teamId) => {
         setDraggedTeamId(teamId);
         e.dataTransfer.setData('text/plain', teamId);
         e.dataTransfer.effectAllowed = 'move';
       };
-
       const handleDragOver = (e, teamId) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
@@ -438,7 +411,6 @@
           setDragOverInfo({ id: null, position: null });
           return;
         }
-
         // 마우스의 위치를 계산해 팀의 '위'인지 '아래'인지 판별
         const rect = e.currentTarget.getBoundingClientRect();
         const midPoint = rect.top + rect.height / 2;
@@ -446,25 +418,21 @@
         
         setDragOverInfo({ id: teamId, position });
       };
-
       const handleDragLeave = (e) => {
         // 자식 요소로 진입할 때의 깜빡임 방지
         if (!e.currentTarget.contains(e.relatedTarget)) {
           setDragOverInfo({ id: null, position: null });
         }
       };
-
       const handleDrop = (e, targetTeamId) => {
         e.preventDefault();
         
         const targetPos = dragOverInfo.position;
         setDragOverInfo({ id: null, position: null });
-
         if (!draggedTeamId || draggedTeamId === targetTeamId || !targetPos) {
           setDraggedTeamId(null);
           return;
         }
-
         const newTeams = [...teams];
         const draggedIndex = newTeams.findIndex(t => t.id === draggedTeamId);
         const [removed] = newTeams.splice(draggedIndex, 1);
@@ -480,7 +448,6 @@
         const updatedTeams = newTeams.map((t, index) => ({ ...t, order: index }));
         setTeams(updatedTeams);
         setDraggedTeamId(null);
-
         if (isFirebaseConfigured) {
           const batch = db.batch();
           updatedTeams.forEach(t => {
@@ -495,17 +462,14 @@
           mockDb.saveTeams(updatedTeams);
         }
       };
-
       const handleDragEnd = () => {
         setDraggedTeamId(null);
         setDragOverInfo({ id: null, position: null });
       };
-
       // Create a Team
       const handleAddTeam = () => {
         const newId = generateId();
         const newTeam = { name: '새로운 팀', carryOver: 0, usedAmount: 0, memberCount: 0, perPersonAmount: 30000, additionalMemberCount: 0, additionalPerPersonAmount: 30000, viewPasscode: '0000', createdAt: Date.now() };
-
         if (isFirebaseConfigured) {
           const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('teams').doc(newId);
           docRef.set(newTeam).catch(err => {
@@ -519,7 +483,6 @@
           showToast('➕ 새로운 팀이 추가되었습니다.');
         }
       };
-
       // Remove a Team
       const handleRemoveTeam = (id) => {
         if (isFirebaseConfigured) {
@@ -536,12 +499,10 @@
         }
         if (selectedTeamId === id) setSelectedTeamId('');
       };
-
       // Update Team data
       const handleUpdateTeam = (id, field, value) => {
         // Optimistic UI updates
         setTeams(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t));
-
         if (isFirebaseConfigured) {
           const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('teams').doc(id);
           docRef.set({ [field]: value }, { merge: true }).catch(err => {
@@ -557,7 +518,6 @@
           }
         }
       };
-
       // Reset mock data helper
       const handleResetMockData = () => {
         localStorage.removeItem('mock_teams');
@@ -569,7 +529,6 @@
         mockDb.saveTeams(initialTeams);
         showToast('🔄 샘플 데이터로 초기화되었습니다.');
       };
-
       const handleShare = () => {
         try {
           let baseUrl = window.location.href.split('?')[0].split('#')[0];
@@ -593,12 +552,10 @@
           showToast('❌ 링크 복사에 실패했습니다.');
         }
       };
-
       const formatCurrency = (amount) => {
         if (amount === undefined || amount === null) return '0';
         return new Intl.NumberFormat('ko-KR').format(amount);
       };
-
       if (isLoading) {
         return (
           <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center text-blue-600 dark:text-blue-400 space-y-4">
@@ -609,9 +566,7 @@
           </div>
         );
       }
-
       const selectedTeam = teams.find(t => t.id === selectedTeamId);
-
       return (
         <div className="min-h-screen text-slate-800 dark:text-slate-100 font-sans selection:bg-blue-200 transition-colors duration-300">
           
@@ -634,7 +589,6 @@
                 >
                   {darkMode ? <Icons.Sun /> : <Icons.Moon />}
                 </button>
-
                 {/* Mode Selector */}
                 {!isSharedLink && (
                   <div className="flex bg-slate-100 dark:bg-slate-800/60 p-1 rounded-xl border border-slate-200/50 dark:border-slate-700/50">
@@ -665,7 +619,6 @@
               </div>
             </div>
           </header>
-
           <main className={`${mode === 'admin' ? 'max-w-6xl' : 'max-w-4xl'} mx-auto px-4 sm:px-6 py-8 transition-all duration-300`}>
             {mode === 'admin' && (
               <div className="space-y-6 animate-in fade-in duration-300">
@@ -715,7 +668,6 @@
                     </button>
                   </div>
                 </div>
-
                 {/* Team List Table Container */}
                 <div className="bg-white dark:bg-slate-900 shadow-sm border border-slate-200/60 dark:border-slate-800/80 rounded-2xl overflow-hidden transition-colors">
                   <div className="p-5 sm:p-6 space-y-4">
@@ -765,7 +717,6 @@
                             <div className="hidden lg:flex items-center justify-center cursor-grab text-slate-300 hover:text-slate-500 dark:text-slate-600 dark:hover:text-slate-400 active:cursor-grabbing w-[20px] ml-1">
                               <Icons.GripVertical />
                             </div>
-
                             {/* 1. 팀 이름 */}
                             <div className="flex-[1.5] pl-0 lg:pl-1 w-full">
                               <span className="text-xs font-semibold text-slate-400 dark:text-slate-550 mb-1 block lg:hidden">팀 이름</span>
@@ -908,7 +859,6 @@
                                 </button>
                               </div>
                             </div>
-
                             {/* 4.5. 추가 인력 */}
                             <div className="flex-[0.7] w-full relative">
                               <span className="text-xs font-semibold text-slate-400 dark:text-slate-555 mb-1 block lg:hidden">추가 인력</span>
@@ -924,7 +874,6 @@
                               />
                               <span className="absolute right-2 top-[50%] lg:top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-555 font-semibold text-xs lg:mt-0 mt-[8px]">명</span>
                             </div>
-
                             {/* 4.6. 추가 금액 */}
                             <div className="flex-[0.7] w-full">
                               <span className="text-xs font-semibold text-slate-400 dark:text-slate-555 mb-1 block lg:hidden">추가 금액</span>
@@ -984,7 +933,6 @@
                         );
                       })
                     )}
-
                     <button
                       onClick={handleAddTeam}
                       className="w-full py-3.5 border-2 border-dashed border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 rounded-xl font-semibold hover:border-blue-400 dark:hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 transition-all flex items-center justify-center gap-2 mt-4 bg-slate-50/50 hover:bg-blue-50/20 dark:bg-slate-900 dark:hover:bg-blue-950/10"
@@ -1004,14 +952,12 @@
                 </div>
               </div>
             )}
-
             {mode === 'user' && (
               <div className="max-w-xl mx-auto space-y-6 animate-in fade-in duration-300 pt-6 sm:pt-10">
                 <div className="text-center space-y-2 mb-8">
                   <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">우리 팀 회식비 조회</h2>
                   <p className="text-slate-500 dark:text-slate-400 text-sm">소속된 팀을 선택하고 실시간으로 반영되는 회식비를 확인하세요.</p>
                 </div>
-
                 {/* Glassmorphic card */}
                 <div className="glass-card shadow-2xl shadow-slate-200/40 dark:shadow-none border border-white/40 dark:border-slate-800/80 rounded-3xl p-6 sm:p-8 space-y-8 relative overflow-hidden transition-all duration-300">
                   <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-400 via-indigo-500 to-purple-500"></div>
@@ -1047,7 +993,6 @@
                         )}
                       </div>
                     </div>
-
                     {/* 소속 팀 선택 드롭다운 */}
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
@@ -1083,7 +1028,6 @@
                       </div>
                     </div>
                   </div>
-
                   {selectedTeamId && selectedTeam ? (() => {
                     const currentAllowance = (selectedTeam.memberCount || 0) * (selectedTeam.perPersonAmount || 0);
                     const additionalAllowance = (selectedTeam.additionalMemberCount || 0) * (selectedTeam.additionalPerPersonAmount || 30000);
@@ -1092,7 +1036,6 @@
                     const meetingExpense = totalMembers === 0 ? 0 : (totalMembers <= 10 ? 50000 : 100000);
                     const calculatedBalance = (selectedTeam.carryOver || 0) + totalAllowance - (selectedTeam.usedAmount || 0);
                     const isAuthorized = authenticatedTeams[selectedTeam.id];
-
                     if (!isAuthorized) {
                       return (
                         <div className="space-y-6 animate-in zoom-in-95 duration-200 bg-slate-50/50 dark:bg-slate-900/30 border border-slate-200/50 dark:border-slate-800 rounded-3xl p-6 text-center">
@@ -1143,7 +1086,6 @@
                         </div>
                       );
                     }
-
                     return (
                       <div className="space-y-6 animate-in zoom-in-95 duration-200">
                         {/* 1. Main Calculated Remaining Balance Display */}
@@ -1156,7 +1098,6 @@
                             <span className="text-xl font-bold text-blue-800 dark:text-blue-400">원</span>
                           </div>
                         </div>
-
                         {/* 2. Detailed Info Breakdown grid (4 Columns) */}
                         <div className="space-y-5">
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1177,7 +1118,6 @@
                                 </span>
                               </div>
                             </div>
-
                             {/* Card 3: 이번달 지원 금액 */}
                             <div className="bg-slate-50/70 dark:bg-slate-900/40 border border-slate-200/30 dark:border-slate-800 p-4 rounded-2xl flex flex-col justify-between h-[96px] sm:col-span-2 lg:col-span-2">
                               <span className="text-xs font-semibold text-slate-400 dark:text-slate-550 block">이번달 총 지원 금액</span>
@@ -1198,7 +1138,6 @@
                               </div>
                             </div>
                           </div>
-
                           {/* 별도 항목 구분선 */}
                           <div className="pt-1">
                             <div className="flex items-center gap-2.5 mb-2.5">
@@ -1228,7 +1167,6 @@
                             </div>
                           </div>
                         </div>
-
                         <p className="text-xs text-center text-slate-400 dark:text-slate-555 font-medium leading-relaxed">
                           전월 이월금액과 이번달 지원 금액을 합산한 금액입니다. (면담비 제외) 🍻✨
                         </p>
@@ -1244,7 +1182,6 @@
               </div>
             )}
           </main>
-
           {/* Passcode Verification Modal */}
           {showPasscodeModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-md animate-in fade-in duration-200">
@@ -1297,7 +1234,6 @@
               </div>
             </div>
           )}
-
           {/* Passcode Change Modal */}
           {showPasscodeChange && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-md animate-in fade-in duration-200">
@@ -1345,7 +1281,6 @@
               </div>
             </div>
           )}
-
           {/* Delete Confirmation Modal */}
           {teamToDelete && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-md animate-in fade-in duration-200">
@@ -1380,7 +1315,6 @@
               </div>
             </div>
           )}
-
           {/* Toast Message */}
           {toastMessage && (
             <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-5 duration-300">
@@ -1392,7 +1326,6 @@
         </div>
       );
     }
-
     const container = document.getElementById('root');
     const root = ReactDOM.createRoot(container);
     root.render(<App />);
