@@ -1,0 +1,73 @@
+rules_version = '2';
+
+// 팀별 회식비 조회 시스템 - Firestore 보안 규칙
+//
+// 이전 규칙은 match /{document=**} 에 allow read, write: if true 였다.
+// 로그인조차 필요 없어서, 외부에서 명령 한 줄로 전체 조회/수정/삭제가 가능했다.
+// (2026-08-31 확인: 인증 토큰 없이 HTTP 200, 팀 49개 전량 조회됨)
+//
+// 이 규칙이 막는 것   : 인증을 거치지 않은 접근 (열린 Firestore를 훑는 스캐너, 단순 curl)
+//                      허용되지 않은 경로 접근
+//                      형식이 어긋난 값 저장으로 인한 데이터 오염
+// 이 규칙이 못 막는 것 : 브라우저에서 익명 로그인을 거친 사람의 조회.
+//                      조회 비밀번호가 문서에 평문으로 들어있고 앱이 팀 전체를
+//                      내려받는 구조라 그대로다. 근본 해결은 데이터 모델 변경 필요.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── 회식비 팀 데이터 ───────────────────────────────────
+    // 앱이 실제로 사용하는 이 경로만 연다.
+    match /artifacts/{appId}/public/data/teams/{teamId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidTeam(request.resource.data);
+      // 관리 화면의 '팀 삭제' 버튼이 동작하려면 삭제도 열려 있어야 한다.
+      allow delete: if isSignedIn();
+    }
+
+    // ── 그 외 모든 경로 ────────────────────────────────────
+    // Firestore는 매칭되는 allow가 없으면 기본적으로 거부하므로 이 블록이
+    // 없어도 차단된다. 의도를 분명히 남기기 위해 명시해 둔다.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // 존재하는 필드만 검사한다.
+    // 실제 데이터(49개 문서) 기준으로 additionalMemberCount /
+    // additionalPerPersonAmount 는 4개, id 는 3개 문서에만 있다.
+    // 이들을 필수로 요구하면 나머지 팀의 저장이 전부 막힌다.
+    function isValidTeam(d) {
+      return d.keys().hasOnly([
+               'id', 'name', 'carryOver', 'usedAmount', 'memberCount',
+               'perPersonAmount', 'additionalMemberCount',
+               'additionalPerPersonAmount', 'viewPasscode', 'order', 'createdAt'
+             ])
+             && ( !('name' in d) || (d.name is string && d.name.size() <= 60) )
+             && ( !('viewPasscode' in d) || (d.viewPasscode is string && d.viewPasscode.size() <= 8) )
+             && ( !('carryOver' in d) || isMoney(d.carryOver) )
+             && ( !('usedAmount' in d) || isMoney(d.usedAmount) )
+             && ( !('perPersonAmount' in d) || isMoney(d.perPersonAmount) )
+             && ( !('additionalPerPersonAmount' in d) || isMoney(d.additionalPerPersonAmount) )
+             && ( !('memberCount' in d) || isCount(d.memberCount) )
+             && ( !('additionalMemberCount' in d) || isCount(d.additionalMemberCount) )
+             && ( !('order' in d) || d.order is int )
+             && ( !('createdAt' in d) || d.createdAt is int )
+             && ( !('id' in d) || d.id is string );
+    }
+
+    // 현재 최대값은 이월금 1,306,600원 / 사용금액 850,000원.
+    // 오타로 0을 몇 개 더 붙이는 사고를 막을 만큼만 여유 있게 잡았다.
+    function isMoney(v) {
+      return v is int && v >= -100000000 && v <= 100000000;
+    }
+
+    // 현재 최대 인원은 18명.
+    function isCount(v) {
+      return v is int && v >= 0 && v <= 1000;
+    }
+  }
+}
