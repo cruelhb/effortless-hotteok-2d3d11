@@ -33,11 +33,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;600;700;800&family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap" rel="stylesheet">
   
-  <!-- React and ReactDOM UMD -->
-  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-  <!-- Babel Standalone for in-browser JSX compilation -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- React and ReactDOM UMD (프로덕션 빌드 + 버전 고정) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Babel Standalone for in-browser JSX compilation (버전 고정 → 브라우저 캐시 적중률 상승) -->
+  <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></script>
   
   <style>
     /* Glassmorphism utility classes */
@@ -86,7 +86,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
   <!-- React Application using JSX -->
-  <script type="text/babel">
+  <script type="text/babel" data-presets="react">
     const { useState, useEffect, useRef } = React;
 
        // 1. Firebase Initializer
@@ -110,7 +110,14 @@
       db = firebase.firestore();
     }
 
-    const generateId = () => Math.random().toString(36).substr(2, 9);
+    const generateId = () => (
+      (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+        : Math.random().toString(36).substring(2, 11)
+    );
+
+    // 관리자가 입력하는 동안 Firestore 쓰기를 모아서 보내는 간격(ms)
+    const WRITE_DEBOUNCE_MS = 600;
 
     // Mock Database for Local Testing (Syncs across tabs via storage event)
     const mockDb = {
@@ -242,6 +249,18 @@
 
       // 삭제 확인 팝업 상태
       const [teamToDelete, setTeamToDelete] = useState(null);
+
+      // 아직 서버에 반영되지 않은 로컬 입력값. { [teamId]: { [field]: value } }
+      // 실시간 스냅샷이 도착해도 이 값들은 덮어쓰지 않아 입력 중 커서/숫자가 튀지 않는다.
+      const pendingEditsRef = useRef({});
+      // 항목별 디바운스 타이머. { `${teamId}:${field}`: timeoutId }
+      const writeTimersRef = useRef({});
+
+      // 서버에서 받은 목록 위에 아직 저장 대기 중인 내 입력값을 덮어씌운다.
+      const applyPendingEdits = (list) => list.map(team => {
+        const pending = pendingEditsRef.current[team.id];
+        return pending ? { ...team, ...pending } : team;
+      });
 
       const handleAuthenticateTeam = (teamId, passcode) => {
         const targetTeam = teams.find(t => t.id === teamId);
@@ -376,26 +395,17 @@
           const teamsRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('teams');
           
           const unsubscribe = teamsRef.onSnapshot((snapshot) => {
-            if (snapshot.empty) {
-              const initialTeams = [
-                { id: generateId(), name: '삼성인서면1팀', carryOver: 100000, usedAmount: 0, memberCount: 15, perPersonAmount: 40000, additionalMemberCount: 0, additionalPerPersonAmount: 30000, viewPasscode: '1234', createdAt: Date.now() },
-                { id: generateId(), name: '마케팅팀', carryOver: 50000, usedAmount: 0, memberCount: 10, perPersonAmount: 30000, additionalMemberCount: 0, additionalPerPersonAmount: 30000, viewPasscode: '1234', createdAt: Date.now() + 1 },
-                { id: generateId(), name: '개발1팀', carryOver: 200000, usedAmount: 0, memberCount: 20, perPersonAmount: 40000, additionalMemberCount: 0, additionalPerPersonAmount: 30000, viewPasscode: '1234', createdAt: Date.now() + 2 },
-              ];
-              initialTeams.forEach(team => {
-                teamsRef.doc(team.id).set(team);
-              });
-            } else {
-              const loadedTeams = [];
-              snapshot.forEach(doc => {
-                loadedTeams.push({ id: doc.id, ...doc.data() });
-              });
-              loadedTeams.sort((a, b) => {
-                if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
-                return (a.createdAt || 0) - (b.createdAt || 0);
-              });
-              setTeams(loadedTeams);
-            }
+            // 팀이 하나도 없으면 빈 목록으로 둔다.
+            // (예전에는 여기서 샘플 3팀을 자동 생성해, 운영 중 팀을 모두 지우면 되살아났다)
+            const loadedTeams = [];
+            snapshot.forEach(doc => {
+              loadedTeams.push({ id: doc.id, ...doc.data() });
+            });
+            loadedTeams.sort((a, b) => {
+              if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+              return (a.createdAt || 0) - (b.createdAt || 0);
+            });
+            setTeams(applyPendingEdits(loadedTeams));
             setIsLoading(false);
           }, (error) => {
             showToast(`❌ 데이터 동기화 실패: ${error.message}`);
@@ -411,7 +421,7 @@
               if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
               return (a.createdAt || 0) - (b.createdAt || 0);
             });
-            setTeams(sorted);
+            setTeams(applyPendingEdits(sorted));
             setIsLoading(false);
           });
           return () => unsubscribe();
@@ -522,6 +532,15 @@
 
       // Remove a Team
       const handleRemoveTeam = (id) => {
+        // 삭제한 팀에 대해 예약된 저장은 취소한다 (삭제 후 문서가 되살아나는 것을 방지)
+        Object.keys(writeTimersRef.current)
+          .filter(timerKey => timerKey.startsWith(`${id}:`))
+          .forEach(timerKey => {
+            clearTimeout(writeTimersRef.current[timerKey]);
+            delete writeTimersRef.current[timerKey];
+          });
+        delete pendingEditsRef.current[id];
+
         if (isFirebaseConfigured) {
           const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('teams').doc(id);
           docRef.delete().catch(err => {
@@ -537,17 +556,26 @@
         if (selectedTeamId === id) setSelectedTeamId('');
       };
 
-      // Update Team data
-      const handleUpdateTeam = (id, field, value) => {
-        // Optimistic UI updates
-        setTeams(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t));
+      // 실제 저장 수행. 저장이 끝나면 해당 항목의 '입력 중' 보호를 해제한다.
+      const commitUpdate = (id, field, value) => {
+        const releasePending = () => {
+          const pending = pendingEditsRef.current[id];
+          if (!pending) return;
+          // 저장하는 사이 더 최신 입력이 들어왔다면 보호를 계속 유지한다.
+          if (pending[field] !== value) return;
+          delete pending[field];
+          if (Object.keys(pending).length === 0) delete pendingEditsRef.current[id];
+        };
 
         if (isFirebaseConfigured) {
           const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('teams').doc(id);
-          docRef.set({ [field]: value }, { merge: true }).catch(err => {
-            showToast(`❌ 저장 실패: ${err.message}`);
-            console.error(err);
-          });
+          docRef.set({ [field]: value }, { merge: true })
+            .then(releasePending)
+            .catch(err => {
+              releasePending();
+              showToast(`❌ 저장 실패: ${err.message}`);
+              console.error(err);
+            });
         } else {
           const currentTeams = mockDb.getTeams();
           const index = currentTeams.findIndex(t => t.id === id);
@@ -555,8 +583,53 @@
             currentTeams[index] = { ...currentTeams[index], [field]: value };
             mockDb.saveTeams(currentTeams);
           }
+          releasePending();
         }
       };
+
+      // 저장 대기 중인 쓰기를 즉시 밀어낸다. (탭을 닫거나 백그라운드로 보낼 때)
+      const flushPendingWrites = () => {
+        Object.keys(writeTimersRef.current).forEach(timerKey => {
+          clearTimeout(writeTimersRef.current[timerKey]);
+          delete writeTimersRef.current[timerKey];
+          const separator = timerKey.indexOf(':');
+          const id = timerKey.slice(0, separator);
+          const field = timerKey.slice(separator + 1);
+          const pending = pendingEditsRef.current[id];
+          if (pending && field in pending) commitUpdate(id, field, pending[field]);
+        });
+      };
+
+      // Update Team data
+      const handleUpdateTeam = (id, field, value) => {
+        // 1) 화면은 즉시 반영 (Optimistic UI)
+        setTeams(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t));
+
+        // 2) 저장 전까지 스냅샷이 이 값을 덮어쓰지 못하도록 보호
+        pendingEditsRef.current[id] = { ...(pendingEditsRef.current[id] || {}), [field]: value };
+
+        // 3) 같은 팀·같은 항목의 연속 입력은 마지막 값 한 번만 저장
+        const timerKey = `${id}:${field}`;
+        clearTimeout(writeTimersRef.current[timerKey]);
+        writeTimersRef.current[timerKey] = setTimeout(() => {
+          delete writeTimersRef.current[timerKey];
+          commitUpdate(id, field, value);
+        }, WRITE_DEBOUNCE_MS);
+      };
+
+      // 탭을 닫거나 백그라운드로 보낼 때 마지막 입력이 유실되지 않도록 저장
+      useEffect(() => {
+        const handleVisibilityChange = () => {
+          if (document.hidden) flushPendingWrites();
+        };
+        window.addEventListener('pagehide', flushPendingWrites);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => {
+          window.removeEventListener('pagehide', flushPendingWrites);
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
+          flushPendingWrites();
+        };
+      }, []);
 
       // Reset mock data helper
       const handleResetMockData = () => {
@@ -570,27 +643,34 @@
         showToast('🔄 샘플 데이터로 초기화되었습니다.');
       };
 
-      const handleShare = () => {
+      const handleShare = async () => {
+        let baseUrl = window.location.href.split('?')[0].split('#')[0];
         try {
-          let baseUrl = window.location.href.split('?')[0].split('#')[0];
-          try {
-            if (window.top !== window.self && document.referrer) {
-              baseUrl = document.referrer.split('?')[0].split('#')[0];
-            }
-          } catch (e) {}
-          
-          const shareUrl = `${baseUrl}?mode=user`;
-          
-          const textArea = document.createElement("textarea");
-          textArea.value = shareUrl;
-          document.body.appendChild(textArea);
-          textArea.select();
-          document.execCommand('copy');
-          document.body.removeChild(textArea);
-          
+          if (window.top !== window.self && document.referrer) {
+            baseUrl = document.referrer.split('?')[0].split('#')[0];
+          }
+        } catch (e) {}
+
+        const shareUrl = `${baseUrl}?mode=user`;
+
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(shareUrl);
+          } else {
+            // http 등 보안 컨텍스트가 아닌 환경을 위한 폴백
+            const textArea = document.createElement('textarea');
+            textArea.value = shareUrl;
+            textArea.style.position = 'fixed';
+            textArea.style.opacity = '0';
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textArea);
+          }
           showToast('✅ 접속 링크 복사 완료!');
         } catch (err) {
-          showToast('❌ 링크 복사에 실패했습니다.');
+          console.error(err);
+          showToast('❌ 복사 실패 — 주소창의 URL을 직접 복사해주세요.');
         }
       };
 
@@ -690,7 +770,7 @@
                         setShowPasscodeChange(true);
                         setNewPasscode('');
                       }}
-                      className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all border border-slate-200/50 dark:border-slate-700/50"
+                      className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all border border-slate-200/50 dark:border-slate-700/50"
                       title="관리자 비밀번호 변경"
                     >
                       <Icons.Settings />
@@ -699,7 +779,7 @@
                     {!isFirebaseConfigured && (
                       <button 
                         onClick={handleResetMockData}
-                        className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all border border-slate-200/50 dark:border-slate-700/50"
+                        className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all border border-slate-200/50 dark:border-slate-700/50"
                         title="샘플 데이터 복구"
                       >
                         <Icons.Undo />
@@ -720,7 +800,7 @@
                 <div className="bg-white dark:bg-slate-900 shadow-sm border border-slate-200/60 dark:border-slate-800/80 rounded-2xl overflow-hidden transition-colors">
                   <div className="p-5 sm:p-6 space-y-4">
                     {teams.length > 0 && (
-                      <div className="hidden lg:flex gap-2 text-xs font-bold text-slate-400 dark:text-slate-550 border-b border-slate-200/40 dark:border-slate-800/50 pb-3 select-none">
+                      <div className="hidden lg:flex gap-2 text-xs font-bold text-slate-400 border-b border-slate-200/40 dark:border-slate-800/50 pb-3 select-none">
                         <div className="w-[20px] ml-1"></div>
                         <div className="flex-[1.5] pl-1">팀명</div>
                         <div className="flex-[1.0] text-center">조회비밀번호</div>
@@ -735,7 +815,7 @@
                       </div>
                     )}
                     {teams.length === 0 ? (
-                      <div className="text-center py-8 text-slate-400 dark:text-slate-550">
+                      <div className="text-center py-8 text-slate-400">
                         <p>등록된 팀이 없습니다. 아래 버튼으로 추가해보세요.</p>
                       </div>
                     ) : (
@@ -768,7 +848,7 @@
 
                             {/* 1. 팀 이름 */}
                             <div className="flex-[1.5] pl-0 lg:pl-1 w-full">
-                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-550 mb-1 block lg:hidden">팀 이름</span>
+                              <span className="text-xs font-semibold text-slate-400 mb-1 block lg:hidden">팀 이름</span>
                               <input
                                 type="text"
                                 value={team.name}
@@ -780,7 +860,7 @@
                             
                             {/* 1.5. 조회 비밀번호 */}
                             <div className="flex-[1.0] w-full">
-                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-550 mb-1 block lg:hidden">조회 비밀번호 (4자리)</span>
+                              <span className="text-xs font-semibold text-slate-400 mb-1 block lg:hidden">조회 비밀번호 (4자리)</span>
                               <input
                                 type="text"
                                 maxLength="4"
@@ -798,7 +878,7 @@
  
                             {/* 2. 전월 이월금액 */}
                             <div className="flex-[1.4] w-full relative">
-                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-550 mb-1 block lg:hidden">전월 이월금액</span>
+                              <span className="text-xs font-semibold text-slate-400 mb-1 block lg:hidden">전월 이월금액</span>
                               <input
                                 type="text"
                                 value={
@@ -827,12 +907,12 @@
                                 className="w-full pl-2 pr-6 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/50 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent outline-none transition-all text-right font-semibold font-outfit dark:text-white text-sm"
                                 placeholder="0"
                               />
-                              <span className="absolute right-2 top-[50%] lg:top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-555 font-semibold text-xs lg:mt-0 mt-[8px]">원</span>
+                              <span className="absolute right-2 top-[50%] lg:top-1/2 -translate-y-1/2 text-slate-400 font-semibold text-xs lg:mt-0 mt-[8px]">원</span>
                             </div>
                             
                             {/* 2.5. 당월 사용금액 */}
                             <div className="flex-[1.4] w-full relative">
-                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-555 mb-1 block lg:hidden">당월 사용금액</span>
+                              <span className="text-xs font-semibold text-slate-400 mb-1 block lg:hidden">당월 사용금액</span>
                               <input
                                 type="text"
                                 value={
@@ -861,12 +941,12 @@
                                 className="w-full pl-2 pr-6 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/50 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent outline-none transition-all text-right font-semibold font-outfit dark:text-white text-sm"
                                 placeholder="0"
                               />
-                              <span className="absolute right-2 top-[50%] lg:top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-555 font-semibold text-xs lg:mt-0 mt-[8px]">원</span>
+                              <span className="absolute right-2 top-[50%] lg:top-1/2 -translate-y-1/2 text-slate-400 font-semibold text-xs lg:mt-0 mt-[8px]">원</span>
                             </div>
                             
                             {/* 3. 본 인력 */}
                             <div className="flex-[0.7] w-full relative">
-                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-555 mb-1 block lg:hidden">이번달 인력수</span>
+                              <span className="text-xs font-semibold text-slate-400 mb-1 block lg:hidden">이번달 인력수</span>
                               <input
                                 type="text"
                                 value={team.memberCount === 0 ? '' : team.memberCount}
@@ -877,12 +957,12 @@
                                 className="w-full pl-2 pr-5 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent outline-none transition-all text-right font-semibold dark:text-white font-outfit text-sm"
                                 placeholder="0"
                               />
-                              <span className="absolute right-2 top-[50%] lg:top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-555 font-semibold text-xs lg:mt-0 mt-[8px]">명</span>
+                              <span className="absolute right-2 top-[50%] lg:top-1/2 -translate-y-1/2 text-slate-400 font-semibold text-xs lg:mt-0 mt-[8px]">명</span>
                             </div>
  
                             {/* 4. 본 금액 */}
                             <div className="flex-[0.7] w-full">
-                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-555 mb-1 block lg:hidden">인당 회식비</span>
+                              <span className="text-xs font-semibold text-slate-400 mb-1 block lg:hidden">인당 회식비</span>
                               <div className="flex bg-slate-100 dark:bg-slate-800/50 p-0.5 rounded-lg border border-slate-200/50 dark:border-slate-700/50 h-[38px] items-center">
                                 <button
                                   type="button"
@@ -890,7 +970,7 @@
                                   className={`flex-1 h-full text-xs font-bold rounded-lg transition-all ${
                                     team.perPersonAmount === 30000
                                       ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
-                                      : 'text-slate-500 dark:text-slate-450 hover:text-slate-800 dark:hover:text-slate-200'
+                                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                                   }`}
                                 >
                                   3만
@@ -901,7 +981,7 @@
                                   className={`flex-1 h-full text-xs font-bold rounded-lg transition-all ${
                                     team.perPersonAmount === 40000
                                       ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
-                                      : 'text-slate-500 dark:text-slate-450 hover:text-slate-800 dark:hover:text-slate-200'
+                                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                                   }`}
                                 >
                                   4만
@@ -911,7 +991,7 @@
 
                             {/* 4.5. 추가 인력 */}
                             <div className="flex-[0.7] w-full relative">
-                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-555 mb-1 block lg:hidden">추가 인력</span>
+                              <span className="text-xs font-semibold text-slate-400 mb-1 block lg:hidden">추가 인력</span>
                               <input
                                 type="text"
                                 value={team.additionalMemberCount === 0 ? '' : (team.additionalMemberCount || '')}
@@ -922,12 +1002,12 @@
                                 className="w-full pl-2 pr-5 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent outline-none transition-all text-right font-semibold dark:text-white font-outfit text-sm"
                                 placeholder="0"
                               />
-                              <span className="absolute right-2 top-[50%] lg:top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-555 font-semibold text-xs lg:mt-0 mt-[8px]">명</span>
+                              <span className="absolute right-2 top-[50%] lg:top-1/2 -translate-y-1/2 text-slate-400 font-semibold text-xs lg:mt-0 mt-[8px]">명</span>
                             </div>
 
                             {/* 4.6. 추가 금액 */}
                             <div className="flex-[0.7] w-full">
-                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-555 mb-1 block lg:hidden">추가 금액</span>
+                              <span className="text-xs font-semibold text-slate-400 mb-1 block lg:hidden">추가 금액</span>
                               <div className="flex bg-slate-100 dark:bg-slate-800/50 p-0.5 rounded-lg border border-slate-200/50 dark:border-slate-700/50 h-[38px] items-center">
                                 <button
                                   type="button"
@@ -935,7 +1015,7 @@
                                   className={`flex-1 h-full text-xs font-bold rounded-lg transition-all ${
                                     (team.additionalPerPersonAmount || 30000) === 30000
                                       ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
-                                      : 'text-slate-500 dark:text-slate-450 hover:text-slate-800 dark:hover:text-slate-200'
+                                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                                   }`}
                                 >
                                   3만
@@ -946,7 +1026,7 @@
                                   className={`flex-1 h-full text-xs font-bold rounded-lg transition-all ${
                                     team.additionalPerPersonAmount === 40000
                                       ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
-                                      : 'text-slate-500 dark:text-slate-450 hover:text-slate-800 dark:hover:text-slate-200'
+                                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                                   }`}
                                 >
                                   4만
@@ -956,11 +1036,11 @@
                             
                             {/* 5. 잔여 회식비 (자동 계산) */}
                             <div className="flex-[1.5] w-full relative">
-                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-555 mb-1 block lg:hidden">잔여 회식비</span>
-                              <div className="w-full px-2 py-1.5 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100/30 dark:border-blue-900/30 rounded-lg text-right font-bold font-outfit text-blue-600 dark:text-blue-400 h-[38px] flex flex-col justify-center items-end select-none border border-blue-100/30">
+                              <span className="text-xs font-semibold text-slate-400 mb-1 block lg:hidden">잔여 회식비</span>
+                              <div className="w-full px-2 py-1.5 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100/30 dark:border-blue-900/30 rounded-lg text-right font-bold font-outfit text-blue-600 dark:text-blue-400 h-[38px] flex flex-col justify-center items-end select-none">
                                 <div className="leading-none text-sm">
                                   {formatCurrency(remainingBalance)}
-                                  <span className="text-slate-450 dark:text-slate-500 font-semibold text-[10px] ml-0.5 font-sans">원</span>
+                                  <span className="text-slate-400 dark:text-slate-500 font-semibold text-[10px] ml-0.5 font-sans">원</span>
                                 </div>
                                 {meetingExpense > 0 && (
                                   <div className="text-[9px] text-slate-400 dark:text-slate-500 font-semibold mt-0.5 leading-none">
@@ -996,7 +1076,7 @@
                 </div>
                 
                 {/* Information Card */}
-                <div className="flex items-start gap-3 text-sm text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-900 border border-slate-200/40 dark:border-slate-800/40 p-4.5 rounded-xl">
+                <div className="flex items-start gap-3 text-sm text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-900 border border-slate-200/40 dark:border-slate-800/40 p-4 rounded-xl">
                   <div className="text-slate-400 dark:text-slate-500"><Icons.Cloud /></div>
                   <p className="leading-relaxed">
                     <strong>클라우드 동기화 모드:</strong> 수정 버튼을 누르거나 새로 링크를 발송하지 않아도 <strong>동일한 웹 주소에 접속된 모든 기기(모바일/데스크톱)에서 실시간으로 화면의 값이 변경</strong>됩니다.
@@ -1038,7 +1118,7 @@
                           <button
                             type="button"
                             onClick={() => setUserSearchTerm('')}
-                            className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-350 p-1 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 rounded-full transition-all"
+                            className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 p-1 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 rounded-full transition-all"
                             title="검색어 초기화"
                           >
                             {/* X 아이콘 */}
@@ -1051,7 +1131,7 @@
                     {/* 소속 팀 선택 드롭다운 */}
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
-                        <label className="text-xs font-bold text-slate-450 dark:text-slate-500 tracking-wider">
+                        <label className="text-xs font-bold text-slate-400 dark:text-slate-500 tracking-wider">
                           소속 팀 선택
                         </label>
                         <span className="flex items-center gap-1.5 text-[9px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 px-2.5 py-1 rounded-full">
@@ -1063,7 +1143,7 @@
                         <select
                           value={selectedTeamId}
                           onChange={(e) => setSelectedTeamId(e.target.value)}
-                          className="w-full appearance-none px-4.5 py-4 bg-slate-100/70 dark:bg-slate-800/40 border border-slate-200/50 dark:border-slate-700/50 rounded-2xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 outline-none text-slate-800 dark:text-white font-semibold cursor-pointer transition-all text-base shadow-inner"
+                          className="w-full appearance-none px-4 py-4 bg-slate-100/70 dark:bg-slate-800/40 border border-slate-200/50 dark:border-slate-700/50 rounded-2xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 outline-none text-slate-800 dark:text-white font-semibold cursor-pointer transition-all text-base shadow-inner"
                         >
                           <option value="" disabled className="dark:bg-slate-900">
                             {userSearchTerm 
@@ -1162,7 +1242,7 @@
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                             {/* Card 1: 전월 이월금액 */}
                             <div className="bg-slate-50/70 dark:bg-slate-900/40 border border-slate-200/30 dark:border-slate-800 p-4 rounded-2xl flex flex-col justify-between h-[96px]">
-                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-550 block">전월 이월금액</span>
+                              <span className="text-xs font-semibold text-slate-400 block">전월 이월금액</span>
                               <span className="text-lg font-bold text-slate-800 dark:text-slate-100 font-outfit block mt-1">
                                 {formatCurrency(selectedTeam.carryOver || 0)} <span className="text-xs font-medium text-slate-500 font-sans">원</span>
                               </span>
@@ -1180,17 +1260,17 @@
 
                             {/* Card 3: 이번달 지원 금액 */}
                             <div className="bg-slate-50/70 dark:bg-slate-900/40 border border-slate-200/30 dark:border-slate-800 p-4 rounded-2xl flex flex-col justify-between h-[96px] sm:col-span-2 lg:col-span-2">
-                              <span className="text-xs font-semibold text-slate-400 dark:text-slate-550 block">이번달 총 지원 금액</span>
+                              <span className="text-xs font-semibold text-slate-400 block">이번달 총 지원 금액</span>
                               <div className="mt-1 flex items-end justify-between">
                                 <span className="text-lg font-bold text-blue-600 dark:text-blue-400 font-outfit block">
                                   {formatCurrency(totalAllowance)} <span className="text-xs font-medium text-slate-500 font-sans">원</span>
                                 </span>
                                 <div className="text-right flex flex-col gap-0.5">
-                                  <span className="text-[10px] text-slate-455 dark:text-slate-500 font-semibold leading-none">
+                                  <span className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold leading-none">
                                     본인원: {selectedTeam.memberCount || 0}명 x {selectedTeam.perPersonAmount === 30000 ? '3만' : '4만'}
                                   </span>
                                   {(selectedTeam.additionalMemberCount || 0) > 0 && (
-                                    <span className="text-[10px] text-slate-455 dark:text-slate-500 font-semibold leading-none">
+                                    <span className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold leading-none">
                                       추가: {selectedTeam.additionalMemberCount}명 x {selectedTeam.additionalPerPersonAmount === 30000 ? '3만' : '4만'}
                                     </span>
                                   )}
@@ -1203,7 +1283,7 @@
                           <div className="pt-1">
                             <div className="flex items-center gap-2.5 mb-2.5">
                               <span className="h-px bg-slate-200/60 dark:bg-slate-800/80 flex-1"></span>
-                              <span className="text-[10px] font-bold text-slate-455 dark:text-slate-500 tracking-wider">별도 집행 항목</span>
+                              <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 tracking-wider">별도 집행 항목</span>
                               <span className="h-px bg-slate-200/60 dark:bg-slate-800/80 flex-1"></span>
                             </div>
                             
@@ -1216,7 +1296,7 @@
                                     별도 지급
                                   </span>
                                 </div>
-                                <span className="text-[10px] text-slate-400 dark:text-slate-550 block leading-normal">
+                                <span className="text-[10px] text-slate-400 block leading-normal">
                                   {totalMembers === 0 ? '인원 없음 (0원)' : (totalMembers <= 10 ? '총 10명 이하 기준 (5만원)' : '총 11명 이상 기준 (10만원)')}
                                 </span>
                               </div>
@@ -1229,7 +1309,7 @@
                           </div>
                         </div>
 
-                        <p className="text-xs text-center text-slate-400 dark:text-slate-555 font-medium leading-relaxed">
+                        <p className="text-xs text-center text-slate-400 font-medium leading-relaxed">
                           전월 이월금액과 이번달 지원 금액을 합산한 금액입니다. (면담비 제외) 🍻✨
                         </p>
                       </div>
@@ -1282,7 +1362,7 @@
                     <button
                       type="button"
                       onClick={() => setShowPasscodeModal(false)}
-                      className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 rounded-xl font-semibold text-sm transition-all"
+                      className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl font-semibold text-sm transition-all"
                     >
                       취소
                     </button>
@@ -1330,7 +1410,7 @@
                     <button
                       type="button"
                       onClick={() => setShowPasscodeChange(false)}
-                      className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 rounded-xl font-semibold text-sm transition-all"
+                      className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl font-semibold text-sm transition-all"
                     >
                       취소
                     </button>
@@ -1362,7 +1442,7 @@
                   <button
                     type="button"
                     onClick={() => setTeamToDelete(null)}
-                    className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 rounded-xl font-semibold text-sm transition-all"
+                    className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl font-semibold text-sm transition-all"
                   >
                     취소
                   </button>
