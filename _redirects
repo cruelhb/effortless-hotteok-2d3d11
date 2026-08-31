@@ -1,0 +1,15 @@
+# Netlify 리다이렉트 규칙
+#
+# 이 저장소는 빌드 명령 없이 루트가 그대로 공개 배포된다.
+# 따라서 index.html 이 아닌 파일도 전부 URL로 열린다.
+# 사이트 동작에 필요 없는 파일은 404 로 막는다.
+#
+# (2026-08-31 확인: 막기 전에는 /firestore.rules 등이 HTTP 200 으로 열렸다)
+
+/firestore.rules            /index.html   404
+/backup.ps1                 /index.html   404
+/serve.ps1                  /index.html   404
+/run.bat                    /index.html   404
+/백업받기.bat                /index.html   404
+/팀별회식비_작업이력.md        /index.html   404
+/.gitignore                 /index.html   404
