@@ -4,12 +4,13 @@
 # 따라서 index.html 이 아닌 파일도 전부 URL로 열린다.
 # 사이트 동작에 필요 없는 파일은 404 로 막는다.
 #
-# (2026-08-31 확인: 막기 전에는 /firestore.rules 등이 HTTP 200 으로 열렸다)
+# 끝의 ! 는 force 플래그다. Netlify는 실제 파일이 존재하는 경로에서는
+# 파일을 우선하고 리다이렉트 규칙을 무시하므로, ! 가 없으면 아무 효과가 없다.
+# (2026-08-31 확인: ! 없이 배포했더니 네 파일 모두 그대로 HTTP 200 이었다)
 
-/firestore.rules            /index.html   404
-/backup.ps1                 /index.html   404
-/serve.ps1                  /index.html   404
-/run.bat                    /index.html   404
-/백업받기.bat                /index.html   404
-/팀별회식비_작업이력.md        /index.html   404
-/.gitignore                 /index.html   404
+/firestore.rules            /index.html   404!
+/backup.ps1                 /index.html   404!
+/serve.ps1                  /index.html   404!
+/run.bat                    /index.html   404!
+/백업받기.bat                /index.html   404!
+/팀별회식비_작업이력.md        /index.html   404!
