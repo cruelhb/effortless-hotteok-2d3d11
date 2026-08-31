@@ -1,4 +1,4 @@
-# serve.ps1
+﻿# serve.ps1
 # 이 스크립트는 로컬에서 React ES Module 및 Firebase 기능이 CORS 정책 오류 없이 정상 작동하도록 임시 웹 서버를 띄워줍니다.
 
 $port = 4173
