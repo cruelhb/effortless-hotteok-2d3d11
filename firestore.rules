@@ -44,7 +44,8 @@ service cloud.firestore {
       return d.keys().hasOnly([
                'id', 'name', 'carryOver', 'usedAmount', 'memberCount',
                'perPersonAmount', 'additionalMemberCount',
-               'additionalPerPersonAmount', 'viewPasscode', 'order', 'createdAt'
+               'additionalPerPersonAmount', 'viewPasscode', 'order', 'createdAt',
+               'lastClosedMonth', 'lastClosedAt'
              ])
              && ( !('name' in d) || (d.name is string && d.name.size() <= 60) )
              && ( !('viewPasscode' in d) || (d.viewPasscode is string && d.viewPasscode.size() <= 8) )
@@ -56,7 +57,10 @@ service cloud.firestore {
              && ( !('additionalMemberCount' in d) || isCount(d.additionalMemberCount) )
              && ( !('order' in d) || d.order is int )
              && ( !('createdAt' in d) || d.createdAt is int )
-             && ( !('id' in d) || d.id is string );
+             && ( !('id' in d) || d.id is string )
+             // 월 마감이 기록하는 필드. 'YYYY-MM' 과 실행 시각.
+             && ( !('lastClosedMonth' in d) || (d.lastClosedMonth is string && d.lastClosedMonth.size() <= 7) )
+             && ( !('lastClosedAt' in d) || d.lastClosedAt is int );
     }
 
     // 현재 최대값은 이월금 1,306,600원 / 사용금액 850,000원.
