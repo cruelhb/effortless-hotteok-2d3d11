@@ -36,8 +36,9 @@
   <!-- React and ReactDOM UMD (프로덕션 빌드 + 버전 고정) -->
   <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
-  <!-- Babel Standalone for in-browser JSX compilation (버전 고정 → 브라우저 캐시 적중률 상승) -->
-  <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></script>
+  <!-- Babel Standalone for in-browser JSX compilation -->
+  <!-- 버전은 현재 운영본과 동일하게 유지한다. 굳이 올릴 이유가 없고, 이미 검증된 조합이다. -->
+  <script src="https://unpkg.com/@babel/standalone@7.24.0/babel.min.js"></script>
   
   <style>
     /* Glassmorphism utility classes */
@@ -87,6 +88,9 @@
 
   <!-- React Application using JSX -->
   <script type="text/babel" data-presets="react">
+    /** @jsxRuntime classic */
+    // classic 런타임을 강제한다. automatic 런타임으로 변환되면 react/jsx-runtime 을
+    // 찾는데, UMD 빌드에는 그 모듈이 없어 앱 전체가 렌더링되지 않는다.
     const { useState, useEffect, useRef } = React;
 
        // 1. Firebase Initializer
