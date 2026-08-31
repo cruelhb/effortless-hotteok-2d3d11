@@ -1,0 +1,17 @@
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Node (추후 빌드 도입 대비)
+node_modules/
+dist/
+.env
+.env.local
+
+# Netlify
+.netlify/
