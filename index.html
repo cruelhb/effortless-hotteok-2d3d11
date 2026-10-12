@@ -886,7 +886,7 @@
             </div>
           </header>
 
-          <main className={`${mode === 'admin' ? 'max-w-6xl' : 'max-w-4xl'} mx-auto px-4 sm:px-6 py-8 transition-all duration-300`}>
+          <main className={`${mode === 'admin' ? 'max-w-7xl' : 'max-w-4xl'} mx-auto px-4 sm:px-6 py-8 transition-all duration-300`}>
             {mode === 'admin' && (
               <div className="space-y-6 animate-in fade-in duration-300">
                 
@@ -963,19 +963,19 @@
                 </div>
 
                 {/* Team List Table Container */}
-                <div className="bg-white dark:bg-slate-900 shadow-sm border border-slate-200/60 dark:border-slate-800/80 rounded-2xl overflow-hidden transition-colors">
-                  <div className="p-5 sm:p-6 space-y-4">
+                <div className="bg-white dark:bg-slate-900 shadow-sm border border-slate-200/60 dark:border-slate-800/80 rounded-2xl overflow-x-auto transition-colors">
+                  <div className="p-5 sm:p-6 space-y-4 lg:min-w-[1200px]">
                     {teams.length > 0 && (
                       <div className="hidden lg:flex gap-2 text-xs font-bold text-slate-400 border-b border-slate-200/40 dark:border-slate-800/50 pb-3 select-none">
                         <div className="w-[20px] ml-1"></div>
                         <div className="flex-[1.5] pl-1">팀명</div>
                         <div className="flex-[1.0] text-center">조회비밀번호</div>
-                        <div className="flex-[1.4] text-right pr-6">전월이월금액</div>
-                        <div className="flex-[1.4] text-right pr-6">당월사용금액</div>
+                        <div className="flex-[1.4] min-w-[128px] text-right pr-6">전월이월금액</div>
+                        <div className="flex-[1.4] min-w-[128px] text-right pr-6">당월사용금액</div>
                         <div className="flex-[0.7] text-right pr-4">인원</div>
                         <div className="flex-[0.7] text-center">인당금액</div>
                         <div className="flex-[0.7] text-right pr-4">추가인원</div>
-                        <div className="flex-[0.7] text-center">추가금액</div>
+                        <div className="flex-[1.4] min-w-[128px] text-right pr-6">추가금액</div>
                         <div className="flex-[1.5] text-right pr-6">합계</div>
                         <div className="w-[44px]"></div>
                       </div>
@@ -1043,7 +1043,7 @@
                             </div>
  
                             {/* 2. 전월 이월금액 */}
-                            <div className="flex-[1.4] w-full relative">
+                            <div className="flex-[1.4] lg:min-w-[128px] w-full relative">
                               <span className="text-xs font-semibold text-slate-400 mb-1 block lg:hidden">전월 이월금액</span>
                               <input
                                 type="text"
@@ -1077,7 +1077,7 @@
                             </div>
                             
                             {/* 2.5. 당월 사용금액 */}
-                            <div className="flex-[1.4] w-full relative">
+                            <div className="flex-[1.4] lg:min-w-[128px] w-full relative">
                               <span className="text-xs font-semibold text-slate-400 mb-1 block lg:hidden">당월 사용금액</span>
                               <input
                                 type="text"
@@ -1172,7 +1172,7 @@
                             </div>
 
                             {/* 4.6. 추가 금액 */}
-                            <div className="flex-[0.7] w-full relative">
+                            <div className="flex-[1.4] lg:min-w-[128px] w-full relative">
                               <span className="text-xs font-semibold text-slate-400 mb-1 block lg:hidden">추가 금액</span>
                               <input
                                 type="text"
