@@ -127,11 +127,12 @@
     // 관리 화면의 '합계', 조회 화면의 '잔여 회식비', 월 마감 때 이월될 금액이
     // 모두 이 함수 하나를 쓴다. 예전에는 같은 식이 화면마다 따로 적혀 있어
     // 한쪽만 고치면 조용히 어긋날 수 있었다.
+    // 추가금액은 총액이며 추가인원과 곱하지 않는다. 추가인원은 회식비 합계 계산에서 제외한다.
     // 면담비는 별도 집행이라 여기에 포함하지 않는다.
     const calcTeamBalance = (team) => (
       (team.carryOver || 0)
       + ((team.memberCount || 0) * (team.perPersonAmount || 0))
-      + ((team.additionalMemberCount || 0) * (team.additionalPerPersonAmount || 30000))
+      + (team.additionalPerPersonAmount ?? 0)
       - (team.usedAmount || 0)
     );
 
@@ -147,9 +148,9 @@
         const data = localStorage.getItem('mock_teams');
         if (!data) {
           const initialTeams = [
-            { id: generateId(), name: '삼성인서면1팀', carryOver: 100000, usedAmount: 0, memberCount: 15, perPersonAmount: 40000, additionalMemberCount: 0, additionalPerPersonAmount: 30000, viewPasscode: '1234', createdAt: Date.now() },
-            { id: generateId(), name: '마케팅팀', carryOver: 50000, usedAmount: 0, memberCount: 10, perPersonAmount: 30000, additionalMemberCount: 0, additionalPerPersonAmount: 30000, viewPasscode: '1234', createdAt: Date.now() + 1 },
-            { id: generateId(), name: '개발1팀', carryOver: 200000, usedAmount: 0, memberCount: 20, perPersonAmount: 40000, additionalMemberCount: 0, additionalPerPersonAmount: 30000, viewPasscode: '1234', createdAt: Date.now() + 2 },
+            { id: generateId(), name: '삼성인서면1팀', carryOver: 100000, usedAmount: 0, memberCount: 15, perPersonAmount: 40000, additionalMemberCount: 0, additionalPerPersonAmount: 0, viewPasscode: '1234', createdAt: Date.now() },
+            { id: generateId(), name: '마케팅팀', carryOver: 50000, usedAmount: 0, memberCount: 10, perPersonAmount: 30000, additionalMemberCount: 0, additionalPerPersonAmount: 0, viewPasscode: '1234', createdAt: Date.now() + 1 },
+            { id: generateId(), name: '개발1팀', carryOver: 200000, usedAmount: 0, memberCount: 20, perPersonAmount: 40000, additionalMemberCount: 0, additionalPerPersonAmount: 0, viewPasscode: '1234', createdAt: Date.now() + 2 },
           ];
           localStorage.setItem('mock_teams', JSON.stringify(initialTeams));
           return initialTeams;
@@ -267,6 +268,7 @@
       const [tempCarryOver, setTempCarryOver] = useState({});
       // 사용금액 임시 입력 상태
       const [tempUsedAmount, setTempUsedAmount] = useState({});
+      const [tempAdditionalAmount, setTempAdditionalAmount] = useState({});
       // 팀 조회 화면 검색어 상태
       const [userSearchTerm, setUserSearchTerm] = useState('');
       
@@ -555,7 +557,7 @@
       // Create a Team
       const handleAddTeam = () => {
         const newId = generateId();
-        const newTeam = { name: '새로운 팀', carryOver: 0, usedAmount: 0, memberCount: 0, perPersonAmount: 30000, additionalMemberCount: 0, additionalPerPersonAmount: 30000, viewPasscode: '0000', createdAt: Date.now() };
+        const newTeam = { name: '새로운 팀', carryOver: 0, usedAmount: 0, memberCount: 0, perPersonAmount: 30000, additionalMemberCount: 0, additionalPerPersonAmount: 0, viewPasscode: '0000', createdAt: Date.now() };
 
         if (isFirebaseConfigured) {
           const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('teams').doc(newId);
@@ -1170,32 +1172,33 @@
                             </div>
 
                             {/* 4.6. 추가 금액 */}
-                            <div className="flex-[0.7] w-full">
+                            <div className="flex-[0.7] w-full relative">
                               <span className="text-xs font-semibold text-slate-400 mb-1 block lg:hidden">추가 금액</span>
-                              <div className="flex bg-slate-100 dark:bg-slate-800/50 p-0.5 rounded-lg border border-slate-200/50 dark:border-slate-700/50 h-[38px] items-center">
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateTeam(team.id, 'additionalPerPersonAmount', 30000)}
-                                  className={`flex-1 h-full text-xs font-bold rounded-lg transition-all ${
-                                    (team.additionalPerPersonAmount || 30000) === 30000
-                                      ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
-                                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                                  }`}
-                                >
-                                  3만
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateTeam(team.id, 'additionalPerPersonAmount', 40000)}
-                                  className={`flex-1 h-full text-xs font-bold rounded-lg transition-all ${
-                                    team.additionalPerPersonAmount === 40000
-                                      ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
-                                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                                  }`}
-                                >
-                                  4만
-                                </button>
-                              </div>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                aria-label={`${team.name} 추가금액`}
+                                value={
+                                  tempAdditionalAmount[team.id] !== undefined
+                                    ? tempAdditionalAmount[team.id]
+                                    : formatCurrency(team.additionalPerPersonAmount ?? 0)
+                                }
+                                onChange={(e) => {
+                                  const rawValue = e.target.value.replace(/[^0-9]/g, '');
+                                  setTempAdditionalAmount(prev => ({ ...prev, [team.id]: rawValue }));
+                                  handleUpdateTeam(team.id, 'additionalPerPersonAmount', rawValue === '' ? 0 : parseInt(rawValue, 10));
+                                }}
+                                onBlur={() => {
+                                  setTempAdditionalAmount(prev => {
+                                    const copy = { ...prev };
+                                    delete copy[team.id];
+                                    return copy;
+                                  });
+                                }}
+                                className="w-full pl-2 pr-6 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent outline-none transition-all text-right font-semibold dark:text-white font-outfit text-sm"
+                                placeholder="0"
+                              />
+                              <span className="absolute right-2 top-[50%] lg:top-1/2 -translate-y-1/2 text-slate-400 font-semibold text-xs lg:mt-0 mt-[8px]">원</span>
                             </div>
                             
                             {/* 5. 잔여 회식비 (자동 계산) */}
@@ -1330,7 +1333,7 @@
 
                   {selectedTeamId && selectedTeam ? (() => {
                     const currentAllowance = (selectedTeam.memberCount || 0) * (selectedTeam.perPersonAmount || 0);
-                    const additionalAllowance = (selectedTeam.additionalMemberCount || 0) * (selectedTeam.additionalPerPersonAmount || 30000);
+                    const additionalAllowance = selectedTeam.additionalPerPersonAmount ?? 0;
                     const totalAllowance = currentAllowance + additionalAllowance;
                     const totalMembers = (selectedTeam.memberCount || 0) + (selectedTeam.additionalMemberCount || 0);
                     const meetingExpense = totalMembers === 0 ? 0 : (totalMembers <= 10 ? 50000 : 100000);
@@ -1433,9 +1436,9 @@
                                   <span className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold leading-none">
                                     본인원: {selectedTeam.memberCount || 0}명 x {selectedTeam.perPersonAmount === 30000 ? '3만' : '4만'}
                                   </span>
-                                  {(selectedTeam.additionalMemberCount || 0) > 0 && (
+                                  {((selectedTeam.additionalMemberCount || 0) > 0 || additionalAllowance !== 0) && (
                                     <span className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold leading-none">
-                                      추가: {selectedTeam.additionalMemberCount}명 x {selectedTeam.additionalPerPersonAmount === 30000 ? '3만' : '4만'}
+                                      추가금액: {formatCurrency(additionalAllowance)}원 · 추가인원: {selectedTeam.additionalMemberCount || 0}명
                                     </span>
                                   )}
                                 </div>
@@ -1474,7 +1477,7 @@
                         </div>
 
                         <p className="text-xs text-center text-slate-400 font-medium leading-relaxed">
-                          전월 이월금액과 이번달 지원 금액을 합산한 금액입니다. (면담비 제외) 🍻✨
+                          전월 이월금액에서 당월 사용금액을 빼고 이번달 지원 금액을 더한 금액입니다. (면담비 제외) 🍻✨
                         </p>
                       </div>
                     );
