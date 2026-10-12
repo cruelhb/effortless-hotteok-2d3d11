@@ -41,7 +41,7 @@ service cloud.firestore {
     // 이들을 필수로 요구하면 나머지 팀의 저장이 전부 막힌다.
     function isValidTeam(d) {
       return d.keys().hasOnly([
-               'id', 'name', 'carryOver', 'usedAmount', 'memberCount',
+               'id', 'name', 'carryOver', 'usedAmount', 'usedAmountEntered', 'memberCount',
                'perPersonAmount', 'additionalMemberCount',
                'additionalPerPersonAmount', 'viewPasscode', 'order', 'createdAt',
                'lastClosedMonth', 'lastClosedAt'
@@ -50,6 +50,7 @@ service cloud.firestore {
              && ( !('viewPasscode' in d) || (d.viewPasscode is string && d.viewPasscode.size() <= 8) )
              && ( !('carryOver' in d) || isMoney(d.carryOver) )
              && ( !('usedAmount' in d) || isMoney(d.usedAmount) )
+             && ( !('usedAmountEntered' in d) || d.usedAmountEntered is bool )
              && ( !('perPersonAmount' in d) || isMoney(d.perPersonAmount) )
              && ( !('additionalPerPersonAmount' in d) || isMoney(d.additionalPerPersonAmount) )
              && ( !('memberCount' in d) || isCount(d.memberCount) )

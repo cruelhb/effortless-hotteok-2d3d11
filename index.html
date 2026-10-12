@@ -123,6 +123,17 @@
     // 관리자가 입력하는 동안 Firestore 쓰기를 모아서 보내는 간격(ms)
     const WRITE_DEBOUNCE_MS = 600;
 
+    // 기존 0원은 입력 여부를 알 수 없으므로 미입력으로 취급한다.
+    const isUsedAmountEntered = (team) =>
+      team.usedAmountEntered === true || (team.usedAmount || 0) !== 0;
+
+    // 사용금액과 입력 여부는 반드시 같은 쓰기로 저장한다.
+    const getTeamUpdate = (field, value, usedAmountEntered = true) => (
+      field === 'usedAmount'
+        ? { usedAmount: value, usedAmountEntered }
+        : { [field]: value }
+    );
+
     // 잔여(합계) 회식비.
     // 관리 화면의 '합계', 조회 화면의 '잔여 회식비', 월 마감 때 이월될 금액이
     // 모두 이 함수 하나를 쓴다. 예전에는 같은 식이 화면마다 따로 적혀 있어
@@ -600,19 +611,20 @@
       };
 
       // 실제 저장 수행. 저장이 끝나면 해당 항목의 '입력 중' 보호를 해제한다.
-      const commitUpdate = (id, field, value) => {
+      const commitUpdate = (id, field, value, usedAmountEntered) => {
+        const updates = getTeamUpdate(field, value, usedAmountEntered);
         const releasePending = () => {
           const pending = pendingEditsRef.current[id];
           if (!pending) return;
           // 저장하는 사이 더 최신 입력이 들어왔다면 보호를 계속 유지한다.
-          if (pending[field] !== value) return;
-          delete pending[field];
+          if (Object.entries(updates).some(([key, val]) => pending[key] !== val)) return;
+          Object.keys(updates).forEach(key => delete pending[key]);
           if (Object.keys(pending).length === 0) delete pendingEditsRef.current[id];
         };
 
         if (isFirebaseConfigured) {
           const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('teams').doc(id);
-          docRef.set({ [field]: value }, { merge: true })
+          docRef.set(updates, { merge: true })
             .then(releasePending)
             .catch(err => {
               releasePending();
@@ -623,7 +635,7 @@
           const currentTeams = mockDb.getTeams();
           const index = currentTeams.findIndex(t => t.id === id);
           if (index > -1) {
-            currentTeams[index] = { ...currentTeams[index], [field]: value };
+            currentTeams[index] = { ...currentTeams[index], ...updates };
             mockDb.saveTeams(currentTeams);
           }
           releasePending();
@@ -650,27 +662,29 @@
 
           if (skip.indexOf(field) !== -1) {
             delete pending[field];
+            if (field === 'usedAmount') delete pending.usedAmountEntered;
             if (Object.keys(pending).length === 0) delete pendingEditsRef.current[id];
             return;
           }
-          commitUpdate(id, field, pending[field]);
+          commitUpdate(id, field, pending[field], pending.usedAmountEntered);
         });
       };
 
       // Update Team data
-      const handleUpdateTeam = (id, field, value) => {
+      const handleUpdateTeam = (id, field, value, usedAmountEntered) => {
+        const updates = getTeamUpdate(field, value, usedAmountEntered);
         // 1) 화면은 즉시 반영 (Optimistic UI)
-        setTeams(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t));
+        setTeams(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
 
         // 2) 저장 전까지 스냅샷이 이 값을 덮어쓰지 못하도록 보호
-        pendingEditsRef.current[id] = { ...(pendingEditsRef.current[id] || {}), [field]: value };
+        pendingEditsRef.current[id] = { ...(pendingEditsRef.current[id] || {}), ...updates };
 
         // 3) 같은 팀·같은 항목의 연속 입력은 마지막 값 한 번만 저장
         const timerKey = `${id}:${field}`;
         clearTimeout(writeTimersRef.current[timerKey]);
         writeTimersRef.current[timerKey] = setTimeout(() => {
           delete writeTimersRef.current[timerKey];
-          commitUpdate(id, field, value);
+          commitUpdate(id, field, value, updates.usedAmountEntered);
         }, WRITE_DEBOUNCE_MS);
       };
 
@@ -692,7 +706,7 @@
 
       // 월 마감
       //   합계(잔여)  -> 전월이월금액
-      //   당월사용금액 -> 0
+      //   당월사용금액 -> 0 (관리자 화면에서는 미입력)
       //   인원/인당금액/추가인원/추가금액은 건드리지 않는다. (다음 달에도 같은 지원금이 붙는다)
       //   마이너스 잔액도 그대로 이월한다.
       const handleCloseMonth = () => {
@@ -709,11 +723,13 @@
           ...team,
           carryOver: calcTeamBalance(team),
           usedAmount: 0,
+          usedAmountEntered: false,
           lastClosedMonth: closedMonth,
           lastClosedAt: closedAt,
         }));
 
         setTeams(closedTeams);
+        setTempUsedAmount({});
 
         const finish = (ok) => {
           setIsClosing(false);
@@ -728,6 +744,7 @@
             batch.set(docRef, {
               carryOver: team.carryOver,
               usedAmount: 0,
+              usedAmountEntered: false,
               lastClosedMonth: closedMonth,
               lastClosedAt: closedAt,
             }, { merge: true });
@@ -1081,10 +1098,11 @@
                               <span className="text-xs font-semibold text-slate-400 mb-1 block lg:hidden">당월 사용금액</span>
                               <input
                                 type="text"
+                                aria-label={`${team.name} 당월사용금액`}
                                 value={
                                   tempUsedAmount[team.id] !== undefined
                                     ? tempUsedAmount[team.id]
-                                    : (team.usedAmount === 0 ? '' : formatCurrency(team.usedAmount))
+                                    : (isUsedAmountEntered(team) ? formatCurrency(team.usedAmount || 0) : '')
                                 }
                                 onChange={(e) => {
                                   const val = e.target.value.replace(/[^-0-9]/g, '');
@@ -1094,7 +1112,7 @@
                                   if (cleanVal !== '' && cleanVal !== '-') {
                                     handleUpdateTeam(team.id, 'usedAmount', parseInt(cleanVal, 10));
                                   } else if (cleanVal === '') {
-                                    handleUpdateTeam(team.id, 'usedAmount', 0);
+                                    handleUpdateTeam(team.id, 'usedAmount', 0, false);
                                   }
                                 }}
                                 onBlur={() => {
@@ -1104,10 +1122,12 @@
                                     return copy;
                                   });
                                 }}
-                                className="w-full pl-2 pr-6 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/50 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent outline-none transition-all text-right font-semibold font-outfit dark:text-white text-sm"
-                                placeholder="0"
+                                className="w-full pl-2 pr-6 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/50 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent outline-none transition-all text-right font-semibold font-outfit text-slate-800 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 text-sm"
+                                placeholder="미입력"
                               />
-                              <span className="absolute right-2 top-[50%] lg:top-1/2 -translate-y-1/2 text-slate-400 font-semibold text-xs lg:mt-0 mt-[8px]">원</span>
+                              {isUsedAmountEntered(team) && (
+                                <span className="absolute right-2 top-[50%] lg:top-1/2 -translate-y-1/2 text-slate-400 font-semibold text-xs lg:mt-0 mt-[8px]">원</span>
+                              )}
                             </div>
                             
                             {/* 3. 본 인력 */}

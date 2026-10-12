@@ -90,7 +90,7 @@ $teams | ConvertTo-Json -Depth 5 | Out-File -FilePath $jsonPath -Encoding utf8
 
 # 엑셀에서 한글이 깨지지 않도록 BOM 포함 UTF-8로 저장한다.
 $teams |
-    Select-Object name, carryOver, usedAmount, memberCount, perPersonAmount,
+    Select-Object name, carryOver, usedAmount, usedAmountEntered, memberCount, perPersonAmount,
                   additionalMemberCount, additionalPerPersonAmount, viewPasscode |
     Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
 
